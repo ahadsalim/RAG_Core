@@ -59,9 +59,22 @@ echo -e "${GREEN}✓ Directories created${NC}"
 echo -e "${YELLOW}Setting up environment...${NC}"
 if [ ! -f ".env" ]; then
     cp deployment/config/.env.example .env
-    echo -e "${GREEN}✓ Created .env file from template${NC}"
-    echo -e "${YELLOW}Please edit .env file with your configurations (especially API keys)${NC}"
-    read -p "Press enter to continue after editing .env file..."
+    
+    # Generate secure random values
+    SECRET_KEY=$(openssl rand -hex 32)
+    JWT_SECRET=$(openssl rand -hex 32)
+    DB_PASSWORD=$(openssl rand -hex 16)
+    REDIS_PASSWORD=$(openssl rand -hex 16)
+    
+    # Update .env with secure values
+    sed -i "s/your-secret-key-change-in-production/$SECRET_KEY/g" .env
+    sed -i "s/your-jwt-secret-key-change-in-production/$JWT_SECRET/g" .env
+    sed -i "s/core_pass/$DB_PASSWORD/g" .env
+    sed -i 's/REDIS_PASSWORD=""/REDIS_PASSWORD="'$REDIS_PASSWORD'"/g' .env
+    
+    echo -e "${GREEN}✓ Created .env file with secure defaults${NC}"
+    echo -e "${GREEN}✓ Generated secure passwords (JWT, DB, Redis)${NC}"
+    echo -e "${YELLOW}Note: Add LLM API keys if needed (edit .env file)${NC}"
 else
     echo -e "${GREEN}✓ .env file already exists${NC}"
 fi

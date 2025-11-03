@@ -38,15 +38,29 @@ print_error() {
 print_header "🚀 Core RAG System - Auto Development Setup"
 
 # Check if .env exists
-if [ ! -f "../.env" ]; then
+if [ ! -f ".env" ]; then
     print_warning ".env file not found! Creating from template..."
     
-    if [ -f "config/.env.example" ]; then
-        cp config/.env.example ../.env
-        print_success ".env file created"
-        print_warning "⚠️  IMPORTANT: Edit .env and add your API keys:"
-        echo "  - HUGGINGFACE_API_KEY=hf_xxxxx (برای Llama-3.1)"
-        echo "  - OPENAI_API_KEY=sk-xxxxx (اختیاری)"
+    if [ -f "deployment/config/.env.example" ]; then
+        cp deployment/config/.env.example .env
+        
+        # Generate secure random values
+        SECRET_KEY=$(openssl rand -hex 32)
+        JWT_SECRET=$(openssl rand -hex 32)
+        DB_PASSWORD=$(openssl rand -hex 16)
+        REDIS_PASSWORD=$(openssl rand -hex 16)
+        
+        # Update .env with secure values
+        sed -i "s/your-secret-key-change-in-production/$SECRET_KEY/g" .env
+        sed -i "s/your-jwt-secret-key-change-in-production/$JWT_SECRET/g" .env
+        sed -i "s/core_pass/$DB_PASSWORD/g" .env
+        sed -i 's/REDIS_PASSWORD=""/REDIS_PASSWORD="'$REDIS_PASSWORD'"/g' .env
+        
+        print_success ".env file created with secure defaults"
+        print_success "Generated secure passwords (JWT, DB, Redis)"
+        print_warning "⚠️  Add LLM API keys if needed:"
+        echo "  - LLM_API_KEY=hf_xxxxx (برای Llama/Groq)"
+        echo "  - LLM_API_KEY=sk-xxxxx (برای OpenAI)"
     else
         print_error "Template file not found!"
         exit 1

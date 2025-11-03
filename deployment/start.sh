@@ -55,21 +55,38 @@ check_prerequisites() {
     fi
 }
 
-# Check if .env exists
+# Check and create .env file with secure defaults
 check_env_file() {
     if [ ! -f "../.env" ]; then
         print_warning ".env file not found!"
         print_info "Creating .env from template..."
         
         if [ -f "config/.env.example" ]; then
+            # Copy template
             cp config/.env.example ../.env
-            print_success ".env file created"
-            print_warning "⚠️  IMPORTANT: Please edit .env file and add your API keys:"
-            echo "  - OPENAI_API_KEY"
-            echo "  - JWT_SECRET_KEY"
-            echo "  - Other required configurations"
+            
+            # Generate secure random values
+            SECRET_KEY=$(openssl rand -hex 32)
+            JWT_SECRET=$(openssl rand -hex 32)
+            DB_PASSWORD=$(openssl rand -hex 16)
+            REDIS_PASSWORD=$(openssl rand -hex 16)
+            
+            # Update .env with secure values
+            sed -i "s/your-secret-key-change-in-production/$SECRET_KEY/g" ../.env
+            sed -i "s/your-jwt-secret-key-change-in-production/$JWT_SECRET/g" ../.env
+            sed -i "s/core_pass/$DB_PASSWORD/g" ../.env
+            sed -i 's/REDIS_PASSWORD=""/REDIS_PASSWORD="'$REDIS_PASSWORD'"/g' ../.env
+            
+            print_success ".env file created with secure defaults"
+            print_info "Generated secure passwords:"
+            echo "  ✓ JWT Secret Key"
+            echo "  ✓ Database Password"
+            echo "  ✓ Redis Password"
             echo ""
-            read -p "Press Enter after editing .env file to continue..."
+            print_warning "⚠️  If you need LLM API keys (OpenAI, Groq, etc.), edit .env:"
+            echo "  nano ../.env"
+            echo "  Then set: LLM_API_KEY=your-key"
+            echo ""
         else
             print_error "Template file not found!"
             exit 1

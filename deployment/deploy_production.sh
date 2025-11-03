@@ -73,19 +73,33 @@ if [ ! -f ".env.production" ]; then
     cp deployment/config/.env.example .env.production
     
     # Generate secure passwords
+    SECRET_KEY=$(openssl rand -hex 32)
     JWT_SECRET=$(openssl rand -hex 32)
     DB_PASSWORD=$(openssl rand -hex 16)
     REDIS_PASSWORD=$(openssl rand -hex 16)
     
     # Update .env.production with secure values
-    sed -i "s/your-secret-jwt-key-change-this-in-production/$JWT_SECRET/" .env.production
-    sed -i "s/core_pass/$DB_PASSWORD/" .env.production
-    sed -i "s/REDIS_PASSWORD=/REDIS_PASSWORD=$REDIS_PASSWORD/" .env.production
+    sed -i "s/your-secret-key-change-in-production/$SECRET_KEY/g" .env.production
+    sed -i "s/your-jwt-secret-key-change-in-production/$JWT_SECRET/g" .env.production
+    sed -i "s/core_pass/$DB_PASSWORD/g" .env.production
+    sed -i 's/REDIS_PASSWORD=""/REDIS_PASSWORD="'$REDIS_PASSWORD'"/g' .env.production
+    
+    # Set production environment
+    sed -i 's/ENVIRONMENT="development"/ENVIRONMENT="production"/g' .env.production
+    sed -i 's/DEBUG=true/DEBUG=false/g' .env.production
+    sed -i 's/RELOAD=true/RELOAD=false/g' .env.production
+    sed -i 's/LOG_LEVEL="INFO"/LOG_LEVEL="WARNING"/g' .env.production
     
     echo -e "${GREEN}✓ Created .env.production with secure defaults${NC}"
-    echo -e "${YELLOW}Please edit .env.production to add your API keys and final configurations${NC}"
-    echo -e "${YELLOW}Especially: OPENAI_API_KEY, QDRANT_API_KEY, etc.${NC}"
-    read -p "Press enter to continue after editing .env.production file..."
+    echo -e "${GREEN}✓ Generated secure passwords:${NC}"
+    echo "  - SECRET_KEY: $(echo $SECRET_KEY | cut -c1-16)..."
+    echo "  - JWT_SECRET: $(echo $JWT_SECRET | cut -c1-16)..."
+    echo "  - DB_PASSWORD: $(echo $DB_PASSWORD | cut -c1-8)..."
+    echo "  - REDIS_PASSWORD: $(echo $REDIS_PASSWORD | cut -c1-8)..."
+    echo ""
+    echo -e "${YELLOW}⚠️  Save these passwords! They are stored in .env.production${NC}"
+    echo -e "${YELLOW}Note: Add LLM API keys if needed (edit .env.production)${NC}"
+    echo ""
 else
     echo -e "${GREEN}✓ .env.production file already exists${NC}"
 fi

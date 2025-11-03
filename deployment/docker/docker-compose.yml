@@ -1,0 +1,154 @@
+version: '3.8'
+
+services:
+  # Core API Service
+  core-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: core-api
+    ports:
+      - "7001:7001"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://core_user:core_pass@postgres-core:5432/core_db
+      - INGEST_DATABASE_URL=postgresql+asyncpg://ingest_reader:ingest_pass@postgres-ingest:5432/ingest_db
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - REDIS_URL=redis://redis-core:6379/0
+      - CELERY_BROKER_URL=redis://redis-core:6379/1
+    depends_on:
+      - postgres-core
+      - redis-core
+      - qdrant
+    volumes:
+      - ./:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 7001 --reload
+    networks:
+      - core-network
+      - ingest-network  # To access ingest database
+
+  # PostgreSQL for Core
+  postgres-core:
+    image: postgres:15-alpine
+    container_name: postgres-core
+    environment:
+      - POSTGRES_DB=core_db
+      - POSTGRES_USER=core_user
+      - POSTGRES_PASSWORD=core_pass
+    volumes:
+      - postgres-core-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "7433:5432"  # Changed to 7000 series to avoid any conflicts
+    networks:
+      - core-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U core_user -d core_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Core
+  redis-core:
+    image: redis:7-alpine
+    container_name: redis-core
+    ports:
+      - "7379:6379"  # Changed to 7000 series to avoid any conflicts
+    volumes:
+      - redis-core-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - core-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "7333:6333"
+      - "7334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__LOG_LEVEL=INFO
+    networks:
+      - core-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: celery-worker
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://core_user:core_pass@postgres-core:5432/core_db
+      - INGEST_DATABASE_URL=postgresql+asyncpg://ingest_reader:ingest_pass@postgres-ingest:5432/ingest_db
+      - QDRANT_HOST=qdrant
+      - REDIS_URL=redis://redis-core:6379/0
+      - CELERY_BROKER_URL=redis://redis-core:6379/1
+    depends_on:
+      - redis-core
+      - postgres-core
+    volumes:
+      - ./:/app
+    command: celery -A app.celery worker --loglevel=info
+    networks:
+      - core-network
+
+  # Celery Beat (Scheduler)
+  celery-beat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: celery-beat
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://core_user:core_pass@postgres-core:5432/core_db
+      - CELERY_BROKER_URL=redis://redis-core:6379/1
+    depends_on:
+      - redis-core
+      - postgres-core
+    volumes:
+      - ./:/app
+    command: celery -A app.celery beat --loglevel=info
+    networks:
+      - core-network
+
+  # Flower (Celery Monitoring)
+  flower:
+    image: mher/flower:latest
+    container_name: flower
+    ports:
+      - "7555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis-core:6379/1
+      - FLOWER_PORT=5555
+    depends_on:
+      - redis-core
+    networks:
+      - core-network
+
+volumes:
+  postgres-core-data:
+  redis-core-data:
+  qdrant-data:
+
+networks:
+  core-network:
+    driver: bridge
+  ingest-network:
+    external: true  # Assumes ingest network exists

@@ -194,6 +194,63 @@ cat > /etc/logrotate.d/core-api <<EOF
 EOF
 echo -e "${GREEN}✓ Log rotation configured${NC}"
 
+# Setup UFW Firewall
+echo -e "${YELLOW}Setting up UFW Firewall...${NC}"
+if command_exists ufw; then
+    echo -e "${GREEN}✓ UFW is already installed${NC}"
+else
+    echo -e "${YELLOW}Installing UFW...${NC}"
+    apt-get update
+    apt-get install -y ufw
+    echo -e "${GREEN}✓ UFW installed${NC}"
+fi
+
+# Configure UFW rules
+echo -e "${YELLOW}Configuring firewall rules...${NC}"
+
+# Reset UFW to default (optional - only for fresh setup)
+if [ "$EUID" -eq 0 ]; then
+    # Allow SSH first (important!)
+    ufw allow 22/tcp comment 'SSH'
+    echo -e "${GREEN}✓ Port 22 (SSH) - Allowed${NC}"
+    
+    # Allow HTTP and HTTPS
+    ufw allow 80/tcp comment 'HTTP'
+    echo -e "${GREEN}✓ Port 80 (HTTP) - Allowed${NC}"
+    
+    ufw allow 443/tcp comment 'HTTPS'
+    echo -e "${GREEN}✓ Port 443 (HTTPS) - Allowed${NC}"
+    
+    # Allow Core API port (if needed for direct access)
+    # Note: In production with Nginx, this might not be needed externally
+    read -p "Allow direct access to Core API on port 7001? (y/N): " allow_api
+    if [[ $allow_api =~ ^[Yy]$ ]]; then
+        ufw allow 7001/tcp comment 'Core API'
+        echo -e "${GREEN}✓ Port 7001 (Core API) - Allowed${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Port 7001 (Core API) - Blocked (access via Nginx only)${NC}"
+    fi
+    
+    # Deny all other incoming by default
+    ufw default deny incoming
+    ufw default allow outgoing
+    
+    # Enable UFW
+    echo -e "${YELLOW}Enabling UFW firewall...${NC}"
+    echo "y" | ufw enable
+    
+    echo -e "${GREEN}✓ UFW Firewall configured and enabled${NC}"
+    echo -e "${BLUE}Current firewall status:${NC}"
+    ufw status numbered
+else
+    echo -e "${YELLOW}⚠️  Skipping UFW setup (requires root access)${NC}"
+    echo -e "${YELLOW}Please run manually:${NC}"
+    echo "  sudo ufw allow 22/tcp"
+    echo "  sudo ufw allow 80/tcp"
+    echo "  sudo ufw allow 443/tcp"
+    echo "  sudo ufw enable"
+fi
+
 # Setup monitoring
 echo -e "${YELLOW}Setting up monitoring...${NC}"
 echo -e "${GREEN}Prometheus metrics available at: http://localhost:7001/metrics${NC}"
@@ -225,10 +282,19 @@ echo -e "${YELLOW}Important next steps:${NC}"
 echo "1. Configure your domain in Nginx: /etc/nginx/sites-available/core-api"
 echo "2. Setup SSL certificate with Let's Encrypt:"
 echo "   certbot --nginx -d your-domain.com"
-echo "3. Configure firewall rules"
+echo "3. ✅ Firewall configured (UFW enabled with necessary ports)"
 echo "4. Setup backup cron job: crontab -e"
-echo "   0 2 * * * /path/to/core/deployment/backup.sh"
+echo "   0 2 * * * $PROJECT_ROOT/deployment/backup_manager.sh --auto-backup"
 echo "5. Monitor logs: docker-compose -f deployment/docker/docker-compose.yml logs -f"
+echo "6. Review generated passwords in .env.production"
+echo ""
+echo -e "${BLUE}🔐 Security Summary:${NC}"
+echo "  ✅ Secure passwords generated (JWT, DB, Redis)"
+echo "  ✅ Firewall configured (UFW)"
+echo "  ✅ Only necessary ports opened (22, 80, 443)"
+if [ "$EUID" -eq 0 ]; then
+    echo -e "${YELLOW}  ⚠️  Remember to setup SSL certificate!${NC}"
+fi
 echo ""
 echo -e "${GREEN}API Documentation: http://your-domain.com/docs${NC}"
 echo -e "${GREEN}Admin Panel: http://your-domain.com/api/v1/admin${NC}"

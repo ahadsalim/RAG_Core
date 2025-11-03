@@ -20,12 +20,15 @@ if [ "$EUID" -ne 0 ]; then
     echo -e "${YELLOW}Warning: Not running as root. Some operations may require sudo.${NC}"
 fi
 
-# Check if running from correct directory
-if [ ! -f "deployment/deploy_production.sh" ]; then
-    echo -e "${RED}Error: Please run this script from the core project root directory${NC}"
-    echo "Usage: ./deployment/deploy_production.sh"
-    exit 1
-fi
+# Detect project root directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+echo "Script directory: $SCRIPT_DIR"
+echo "Project root: $PROJECT_ROOT"
+
+# Change to project root
+cd "$PROJECT_ROOT" || exit 1
 
 # Production environment check
 echo -e "${RED}WARNING: This is PRODUCTION deployment!${NC}"

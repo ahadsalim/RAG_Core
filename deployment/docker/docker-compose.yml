@@ -15,8 +15,8 @@ services:
       - INGEST_DATABASE_URL=postgresql+asyncpg://ingest_reader:ingest_pass@postgres-ingest:5432/ingest_db
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
-      - REDIS_URL=redis://redis-core:6379/0
-      - CELERY_BROKER_URL=redis://redis-core:6379/1
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
     depends_on:
       - postgres-core
       - redis-core
@@ -58,7 +58,7 @@ services:
       - "7379:6379"  # Changed to 7000 series to avoid any conflicts
     volumes:
       - redis-core-data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     networks:
       - core-network
     healthcheck:
@@ -99,8 +99,8 @@ services:
       - DATABASE_URL=postgresql+asyncpg://core_user:core_pass@postgres-core:5432/core_db
       - INGEST_DATABASE_URL=postgresql+asyncpg://ingest_reader:ingest_pass@postgres-ingest:5432/ingest_db
       - QDRANT_HOST=qdrant
-      - REDIS_URL=redis://redis-core:6379/0
-      - CELERY_BROKER_URL=redis://redis-core:6379/1
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
     depends_on:
       - redis-core
       - postgres-core
@@ -119,7 +119,7 @@ services:
     environment:
       - ENVIRONMENT=development
       - DATABASE_URL=postgresql+asyncpg://core_user:core_pass@postgres-core:5432/core_db
-      - CELERY_BROKER_URL=redis://redis-core:6379/1
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
     depends_on:
       - redis-core
       - postgres-core
@@ -136,7 +136,7 @@ services:
     ports:
       - "5555:5555"
     environment:
-      - CELERY_BROKER_URL=redis://redis-core:6379/1
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
       - FLOWER_PORT=5555
     depends_on:
       - redis-core

@@ -170,19 +170,116 @@ case $choice in
         echo "  • Setup Nginx reverse proxy"
         echo "  • Configure systemd service"
         echo "  • Setup log rotation"
-        echo "  • Generate secure passwords"
+        echo "  • Generate and apply secure passwords/keys (one-time display)"
         echo ""
         print_error "This requires root access and will modify system configuration"
         echo ""
         read -p "Are you absolutely sure? (y/N): " confirm
         if [[ $confirm =~ ^[Yy]$ ]]; then
+            # --- One-time secure credential generation for PRODUCTION ---
+            # Always back up existing .env and (re)generate strong secrets
+            PROD_ENV_PATH="$PROJECT_ROOT/.env"
+            PROD_ENV_TEMPLATE="$SCRIPT_DIR/config/.env.example"
+            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+            print_info "Preparing production .env and generating strong credentials..."
+
+            # Backup existing .env if present
+            if [ -f "$PROD_ENV_PATH" ]; then
+                cp "$PROD_ENV_PATH" "$PROD_ENV_PATH.backup-$TIMESTAMP"
+                print_warning "Backed up existing .env to .env.backup-$TIMESTAMP"
+            else
+                cp "$PROD_ENV_TEMPLATE" "$PROD_ENV_PATH"
+                print_info "Created .env from template"
+            fi
+
+            # Generate secure values
+            SECRET_KEY=$(openssl rand -base64 48 | tr -d '\n')
+            JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')
+            DB_PASSWORD=$(openssl rand -base64 24 | tr -d '\n')
+            REDIS_PASSWORD=$(openssl rand -base64 24 | tr -d '\n')
+            INGEST_API_KEY=$(openssl rand -base64 48 | tr -d '\n')
+            USERS_API_KEY=$(openssl rand -base64 48 | tr -d '\n')
+
+            # Ensure ENV is production and hardened
+            sed -i 's/^ENVIRONMENT=.*/ENVIRONMENT="production"/g' "$PROD_ENV_PATH"
+            sed -i 's/^DEBUG=.*/DEBUG=false/g' "$PROD_ENV_PATH"
+            sed -i 's/^RELOAD=.*/RELOAD=false/g' "$PROD_ENV_PATH"
+            sed -i 's/^LOG_LEVEL=.*/LOG_LEVEL="WARNING"/g' "$PROD_ENV_PATH"
+
+            # Apply secrets/keys
+            # SECRET_KEY / JWT_SECRET_KEY
+            if grep -q '^SECRET_KEY=' "$PROD_ENV_PATH"; then
+                sed -i "s#^SECRET_KEY=.*#SECRET_KEY=\"$SECRET_KEY\"#g" "$PROD_ENV_PATH"
+            else
+                echo "SECRET_KEY=\"$SECRET_KEY\"" >> "$PROD_ENV_PATH"
+            fi
+            if grep -q '^JWT_SECRET_KEY=' "$PROD_ENV_PATH"; then
+                sed -i "s#^JWT_SECRET_KEY=.*#JWT_SECRET_KEY=\"$JWT_SECRET\"#g" "$PROD_ENV_PATH"
+            else
+                echo "JWT_SECRET_KEY=\"$JWT_SECRET\"" >> "$PROD_ENV_PATH"
+            fi
+
+            # Redis password and URL (inject password into URL if host present)
+            if grep -q '^REDIS_PASSWORD=' "$PROD_ENV_PATH"; then
+                sed -i "s#^REDIS_PASSWORD=.*#REDIS_PASSWORD=\"$REDIS_PASSWORD\"#g" "$PROD_ENV_PATH"
+            else
+                echo "REDIS_PASSWORD=\"$REDIS_PASSWORD\"" >> "$PROD_ENV_PATH"
+            fi
+            if grep -q '^REDIS_URL=' "$PROD_ENV_PATH"; then
+                # Transform redis://host:port/db -> redis://:pass@host:port/db
+                OLD_REDIS_URL=$(grep '^REDIS_URL=' "$PROD_ENV_PATH" | sed 's/^REDIS_URL=\"\(.*\)\"/\1/')
+                if echo "$OLD_REDIS_URL" | grep -q '^redis://'; then
+                    URL_NO_SCHEME=${OLD_REDIS_URL#redis://}
+                    if echo "$URL_NO_SCHEME" | grep -q '@'; then
+                        # replace existing password
+                        HOSTPART=${URL_NO_SCHEME#*@}
+                        NEW_REDIS_URL="redis://:$REDIS_PASSWORD@$HOSTPART"
+                    else
+                        NEW_REDIS_URL="redis://:$REDIS_PASSWORD@$URL_NO_SCHEME"
+                    fi
+                    sed -i "s#^REDIS_URL=\".*\"#REDIS_URL=\"$NEW_REDIS_URL\"#g" "$PROD_ENV_PATH"
+                fi
+            fi
+
+            # Database URL password rotation (only for core_user in template form)
+            if grep -q '^DATABASE_URL=' "$PROD_ENV_PATH"; then
+                OLD_DB_URL=$(grep '^DATABASE_URL=' "$PROD_ENV_PATH" | sed 's/^DATABASE_URL=\"\(.*\)\"/\1/')
+                # Replace password between user:pass@
+                if echo "$OLD_DB_URL" | grep -q 'core_user:'; then
+                    NEW_DB_URL=$(echo "$OLD_DB_URL" | sed -E "s#(core_user:)[^@]*@#\1$DB_PASSWORD@#")
+                    sed -i "s#^DATABASE_URL=\".*\"#DATABASE_URL=\"$NEW_DB_URL\"#g" "$PROD_ENV_PATH"
+                fi
+            fi
+
+            # Inter-service API keys
+            if grep -q '^INGEST_API_KEY=' "$PROD_ENV_PATH"; then
+                sed -i "s#^INGEST_API_KEY=.*#INGEST_API_KEY=\"$INGEST_API_KEY\"#g" "$PROD_ENV_PATH"
+            else
+                echo "INGEST_API_KEY=\"$INGEST_API_KEY\"" >> "$PROD_ENV_PATH"
+            fi
+            if grep -q '^USERS_API_KEY=' "$PROD_ENV_PATH"; then
+                sed -i "s#^USERS_API_KEY=.*#USERS_API_KEY=\"$USERS_API_KEY\"#g" "$PROD_ENV_PATH"
+            else
+                echo "USERS_API_KEY=\"$USERS_API_KEY\"" >> "$PROD_ENV_PATH"
+            fi
+
+            print_success "Production credentials generated and applied to .env"
+
+            # Proceed with production deployment
             if chmod +x "$SCRIPT_DIR/deploy_production.sh" && sudo "$SCRIPT_DIR/deploy_production.sh"; then
                 print_success "Production environment deployed successfully!"
                 echo ""
                 print_header "🎉 Production System Ready!"
                 echo ""
-                echo "📍 Important Information:"
-                echo "  🔐 Secure passwords generated and stored"
+                echo "📍 Important Information: (displayed ONCE)"
+                echo "  🔐 Secrets (store them securely):"
+                echo "    - SECRET_KEY: ${SECRET_KEY}"
+                echo "    - JWT_SECRET_KEY: ${JWT_SECRET}"
+                echo "    - DATABASE_PASSWORD (core_user): ${DB_PASSWORD}"
+                echo "    - REDIS_PASSWORD: ${REDIS_PASSWORD}"
+                echo "    - INGEST_API_KEY: ${INGEST_API_KEY}"
+                echo "    - USERS_API_KEY: ${USERS_API_KEY}"
                 echo "  🌐 Configure your domain in Nginx"
                 echo "  🔒 Setup SSL with: certbot --nginx"
                 echo "  📊 Monitor: systemctl status core-api"

@@ -46,11 +46,10 @@ class SyncStatusResponse(BaseModel):
 
 
 class SyncStatisticsResponse(BaseModel):
-    """Complete sync statistics response."""
+    """Complete Core statistics response."""
     timestamp: str
-    ingest_database: Dict[str, Any]
-    core_qdrant: Dict[str, Any]
-    sync_progress: Dict[str, Any]
+    postgresql: Dict[str, Any]
+    qdrant: Dict[str, Any]
     summary: Dict[str, Any]
 
 
@@ -234,10 +233,12 @@ async def get_sync_statistics(
     api_key: str = Depends(verify_sync_api_key)
 ):
     """
-    Get complete synchronization statistics.
+    Get complete Core system statistics.
     
-    Returns detailed statistics from both Ingest database and Core Qdrant,
-    including sync progress and transfer status.
+    Returns detailed statistics from Core PostgreSQL and Qdrant:
+    - User profiles, conversations, messages
+    - Query cache and feedback
+    - Vector embeddings in Qdrant
     """
     try:
         sync_service = SyncService()
@@ -245,9 +246,8 @@ async def get_sync_statistics(
         
         return SyncStatisticsResponse(
             timestamp=stats["timestamp"],
-            ingest_database=stats["ingest_database"],
-            core_qdrant=stats["core_qdrant"],
-            sync_progress=stats["sync_progress"],
+            postgresql=stats["postgresql"],
+            qdrant=stats["qdrant"],
             summary=stats["summary"]
         )
         

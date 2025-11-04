@@ -480,89 +480,130 @@ class SyncService:
     
     async def get_complete_statistics(self) -> Dict[str, Any]:
         """
-        Get complete statistics from both Ingest database and Core Qdrant.
+        Get complete statistics from Core PostgreSQL and Qdrant.
         
         Returns:
             Complete statistics including:
-            - Total embeddings in Ingest database
-            - Total embeddings in Core Qdrant
-            - Sync progress and remaining items
-            - Breakdown by vector dimensions
+            - User and conversation data from PostgreSQL
+            - Vector embeddings from Qdrant
+            - Cache and feedback statistics
         """
         try:
+            from app.db.session import get_session
+            from sqlalchemy import text, func
+            from app.models.user import UserProfile, Conversation, Message, QueryCache, UserFeedback
+            
             stats = {
                 "timestamp": datetime.utcnow().isoformat(),
-                "ingest_database": {},
-                "core_qdrant": {},
-                "sync_progress": {},
+                "postgresql": {},
+                "qdrant": {},
                 "summary": {}
             }
             
-            # Get Ingest database statistics
-            async with get_ingest_session() as session:
-                # Total embeddings in Ingest
-                total_query = text("""
-                    SELECT 
-                        COUNT(*) as total_embeddings,
-                        COUNT(DISTINCT object_id) as unique_documents,
-                        COUNT(CASE WHEN dim = 768 THEN 1 END) as dim_768,
-                        COUNT(CASE WHEN dim = 512 THEN 1 END) as dim_512,
-                        COUNT(CASE WHEN dim = 1536 THEN 1 END) as dim_1536,
-                        COUNT(CASE WHEN dim = 3072 THEN 1 END) as dim_3072,
-                        MIN(created_at) as oldest_embedding,
-                        MAX(created_at) as newest_embedding
-                    FROM ingest_apps_embeddings_embedding
-                """)
+            # Get PostgreSQL statistics
+            async with get_session() as session:
+                # User statistics
+                user_count = await session.scalar(
+                    text("SELECT COUNT(*) FROM user_profiles WHERE is_active = true")
+                )
                 
-                result = await session.execute(total_query)
-                ingest_stats = result.fetchone()
+                user_by_tier = await session.execute(
+                    text("""
+                        SELECT tier, COUNT(*) as count 
+                        FROM user_profiles 
+                        WHERE is_active = true
+                        GROUP BY tier
+                    """)
+                )
+                tier_stats = {row.tier: row.count for row in user_by_tier}
                 
-                # Sync jobs statistics
-                jobs_query = text("""
-                    SELECT 
-                        COUNT(*) as total_jobs,
-                        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
-                        COUNT(CASE WHEN status = 'running' THEN 1 END) as running,
-                        COUNT(CASE WHEN status = 'success' THEN 1 END) as success,
-                        COUNT(CASE WHEN status = 'error' THEN 1 END) as error,
-                        COUNT(CASE WHEN job_type = 'document' THEN 1 END) as documents,
-                        COUNT(CASE WHEN job_type = 'unit' THEN 1 END) as units,
-                        COUNT(CASE WHEN job_type = 'qa' THEN 1 END) as qa_pairs
-                    FROM ingest_apps_syncbridge_syncjob
-                """)
+                # Conversation statistics
+                conversation_stats = await session.execute(
+                    text("""
+                        SELECT 
+                            COUNT(*) as total_conversations,
+                            SUM(message_count) as total_messages,
+                            AVG(message_count) as avg_messages_per_conversation
+                        FROM conversations
+                        WHERE is_active = true
+                    """)
+                )
+                conv_data = conversation_stats.fetchone()
                 
-                result = await session.execute(jobs_query)
-                jobs_stats = result.fetchone()
+                # Message statistics
+                message_stats = await session.execute(
+                    text("""
+                        SELECT 
+                            COUNT(*) as total_messages,
+                            COUNT(CASE WHEN role = 'user' THEN 1 END) as user_messages,
+                            COUNT(CASE WHEN role = 'assistant' THEN 1 END) as assistant_messages,
+                            SUM(tokens) as total_tokens,
+                            AVG(processing_time_ms) as avg_processing_time
+                        FROM messages
+                        WHERE is_active = true
+                    """)
+                )
+                msg_data = message_stats.fetchone()
                 
-                stats["ingest_database"] = {
-                    "total_embeddings": ingest_stats.total_embeddings if ingest_stats else 0,
-                    "unique_documents": ingest_stats.unique_documents if ingest_stats else 0,
-                    "by_dimension": {
-                        "512": ingest_stats.dim_512 if ingest_stats else 0,
-                        "768": ingest_stats.dim_768 if ingest_stats else 0,
-                        "1536": ingest_stats.dim_1536 if ingest_stats else 0,
-                        "3072": ingest_stats.dim_3072 if ingest_stats else 0,
+                # Cache statistics
+                cache_stats = await session.execute(
+                    text("""
+                        SELECT 
+                            COUNT(*) as total_cached,
+                            SUM(hit_count) as total_hits,
+                            COUNT(CASE WHEN expires_at > NOW() THEN 1 END) as active_cache
+                        FROM query_cache
+                        WHERE is_active = true
+                    """)
+                )
+                cache_data = cache_stats.fetchone()
+                
+                # Feedback statistics
+                feedback_stats = await session.execute(
+                    text("""
+                        SELECT 
+                            COUNT(*) as total_feedback,
+                            AVG(rating) as avg_rating,
+                            COUNT(CASE WHEN processed = true THEN 1 END) as processed_feedback
+                        FROM user_feedback
+                        WHERE is_active = true
+                    """)
+                )
+                feedback_data = feedback_stats.fetchone()
+                
+                stats["postgresql"] = {
+                    "users": {
+                        "total": user_count or 0,
+                        "by_tier": tier_stats,
                     },
-                    "oldest_embedding": ingest_stats.oldest_embedding.isoformat() if ingest_stats and ingest_stats.oldest_embedding else None,
-                    "newest_embedding": ingest_stats.newest_embedding.isoformat() if ingest_stats and ingest_stats.newest_embedding else None,
-                    "sync_jobs": {
-                        "total": jobs_stats.total_jobs if jobs_stats else 0,
-                        "pending": jobs_stats.pending if jobs_stats else 0,
-                        "running": jobs_stats.running if jobs_stats else 0,
-                        "success": jobs_stats.success if jobs_stats else 0,
-                        "error": jobs_stats.error if jobs_stats else 0,
-                        "by_type": {
-                            "documents": jobs_stats.documents if jobs_stats else 0,
-                            "units": jobs_stats.units if jobs_stats else 0,
-                            "qa_pairs": jobs_stats.qa_pairs if jobs_stats else 0,
-                        }
+                    "conversations": {
+                        "total": conv_data.total_conversations if conv_data else 0,
+                        "total_messages_in_conversations": conv_data.total_messages if conv_data else 0,
+                        "avg_messages_per_conversation": float(conv_data.avg_messages_per_conversation) if conv_data and conv_data.avg_messages_per_conversation else 0,
+                    },
+                    "messages": {
+                        "total": msg_data.total_messages if msg_data else 0,
+                        "user_messages": msg_data.user_messages if msg_data else 0,
+                        "assistant_messages": msg_data.assistant_messages if msg_data else 0,
+                        "total_tokens": msg_data.total_tokens if msg_data else 0,
+                        "avg_processing_time_ms": float(msg_data.avg_processing_time) if msg_data and msg_data.avg_processing_time else 0,
+                    },
+                    "cache": {
+                        "total_cached_queries": cache_data.total_cached if cache_data else 0,
+                        "total_cache_hits": cache_data.total_hits if cache_data else 0,
+                        "active_cache_entries": cache_data.active_cache if cache_data else 0,
+                    },
+                    "feedback": {
+                        "total": feedback_data.total_feedback if feedback_data else 0,
+                        "avg_rating": float(feedback_data.avg_rating) if feedback_data and feedback_data.avg_rating else 0,
+                        "processed": feedback_data.processed_feedback if feedback_data else 0,
                     }
                 }
             
             # Get Qdrant statistics
             qdrant_info = await self.qdrant_service.get_collection_info()
             
-            stats["core_qdrant"] = {
+            stats["qdrant"] = {
                 "total_points": qdrant_info.get("points_count", 0),
                 "vectors_count": qdrant_info.get("vectors_count", 0),
                 "indexed_vectors": qdrant_info.get("indexed_vectors_count", 0),
@@ -570,35 +611,15 @@ class SyncService:
                 "collection_name": qdrant_info.get("collection_name", "legal_documents"),
             }
             
-            # Get last sync info from Redis
-            redis = await get_redis_client()
-            last_sync = await redis.get("sync:last_embedding_sync")
-            
-            # Calculate sync progress
-            total_in_ingest = stats["ingest_database"]["total_embeddings"]
-            total_in_qdrant = stats["core_qdrant"]["total_points"]
-            
-            remaining = max(0, total_in_ingest - total_in_qdrant)
-            synced_percentage = (total_in_qdrant / total_in_ingest * 100) if total_in_ingest > 0 else 0
-            
-            stats["sync_progress"] = {
-                "last_sync": last_sync,
-                "total_synced": total_in_qdrant,
-                "total_remaining": remaining,
-                "sync_percentage": round(synced_percentage, 2),
-                "pending_jobs": stats["ingest_database"]["sync_jobs"]["pending"],
-                "error_jobs": stats["ingest_database"]["sync_jobs"]["error"],
-            }
-            
             # Summary
             stats["summary"] = {
-                "status": "synced" if remaining == 0 else "pending",
-                "total_embeddings_in_ingest": total_in_ingest,
-                "total_embeddings_in_core": total_in_qdrant,
-                "embeddings_transferred": total_in_qdrant,
-                "embeddings_remaining": remaining,
-                "sync_completion": f"{synced_percentage:.1f}%",
-                "has_errors": stats["ingest_database"]["sync_jobs"]["error"] > 0,
+                "total_users": stats["postgresql"]["users"]["total"],
+                "total_conversations": stats["postgresql"]["conversations"]["total"],
+                "total_messages": stats["postgresql"]["messages"]["total"],
+                "total_vectors_in_qdrant": stats["qdrant"]["total_points"],
+                "total_cached_queries": stats["postgresql"]["cache"]["total_cached_queries"],
+                "avg_user_rating": stats["postgresql"]["feedback"]["avg_rating"],
+                "qdrant_status": stats["qdrant"]["status"],
             }
             
             return stats
@@ -608,8 +629,7 @@ class SyncService:
             return {
                 "timestamp": datetime.utcnow().isoformat(),
                 "error": str(e),
-                "ingest_database": {},
-                "core_qdrant": {},
-                "sync_progress": {},
+                "postgresql": {},
+                "qdrant": {},
                 "summary": {"status": "error", "message": str(e)}
             }

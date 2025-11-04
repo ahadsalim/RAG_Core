@@ -17,6 +17,7 @@ services:
       - QDRANT_PORT=6333
       - REDIS_URL=${REDIS_URL}
       - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
     depends_on:
       - postgres-core
       - redis-core
@@ -88,60 +89,65 @@ services:
       timeout: 5s
       retries: 5
 
-  # Celery Worker
-  celery-worker:
-    build:
-      context: ../..
-      dockerfile: deployment/docker/Dockerfile
-    container_name: celery-worker
-    environment:
-      - ENVIRONMENT=development
-      - DATABASE_URL=postgresql+asyncpg://core_user:core_pass@postgres-core:5432/core_db
-      - INGEST_DATABASE_URL=postgresql+asyncpg://ingest_reader:ingest_pass@postgres-ingest:5432/ingest_db
-      - QDRANT_HOST=qdrant
-      - REDIS_URL=${REDIS_URL}
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
-    depends_on:
-      - redis-core
-      - postgres-core
-    volumes:
-      - ../../:/app
-    command: celery -A app.celery worker --loglevel=info
-    networks:
-      - core-network
+  # Celery Worker (Disabled - not currently used in the application)
+  # Uncomment when background tasks are implemented
+  # celery-worker:
+  #   build:
+  #     context: ../..
+  #     dockerfile: deployment/docker/Dockerfile
+  #   container_name: celery-worker
+  #   environment:
+  #     - ENVIRONMENT=development
+  #     - DATABASE_URL=postgresql+asyncpg://core_user:core_pass@postgres-core:5432/core_db
+  #     - INGEST_DATABASE_URL=postgresql+asyncpg://ingest_reader:ingest_pass@postgres-ingest:5432/ingest_db
+  #     - QDRANT_HOST=qdrant
+  #     - REDIS_URL=${REDIS_URL}
+  #     - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+  #     - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+  #   depends_on:
+  #     - redis-core
+  #     - postgres-core
+  #   volumes:
+  #     - ../../:/app
+  #   command: celery -A app.celery worker --loglevel=info
+  #   networks:
+  #     - core-network
 
-  # Celery Beat (Scheduler)
-  celery-beat:
-    build:
-      context: ../..
-      dockerfile: deployment/docker/Dockerfile
-    container_name: celery-beat
-    environment:
-      - ENVIRONMENT=development
-      - DATABASE_URL=postgresql+asyncpg://core_user:core_pass@postgres-core:5432/core_db
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
-    depends_on:
-      - redis-core
-      - postgres-core
-    volumes:
-      - ../../:/app
-    command: celery -A app.celery beat --loglevel=info
-    networks:
-      - core-network
+  # Celery Beat (Scheduler) (Disabled - not currently used in the application)
+  # Uncomment when scheduled tasks are implemented
+  # celery-beat:
+  #   build:
+  #     context: ../..
+  #     dockerfile: deployment/docker/Dockerfile
+  #   container_name: celery-beat
+  #   environment:
+  #     - ENVIRONMENT=development
+  #     - DATABASE_URL=postgresql+asyncpg://core_user:core_pass@postgres-core:5432/core_db
+  #     - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+  #     - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+  #   depends_on:
+  #     - redis-core
+  #     - postgres-core
+  #   volumes:
+  #     - ../../:/app
+  #   command: celery -A app.celery beat --loglevel=info
+  #   networks:
+  #     - core-network
 
-  # Flower (Celery Monitoring)
-  flower:
-    image: mher/flower:2.0.1
-    container_name: flower
-    ports:
-      - "5555:5555"
-    environment:
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
-      - FLOWER_PORT=5555
-    depends_on:
-      - redis-core
-    networks:
-      - core-network
+  # Flower (Celery Monitoring) (Disabled - Celery not currently used)
+  # Uncomment when Celery workers are enabled
+  # flower:
+  #   image: mher/flower:2.0.1
+  #   container_name: flower
+  #   ports:
+  #     - "5555:5555"
+  #   environment:
+  #     - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+  #     - FLOWER_PORT=5555
+  #   depends_on:
+  #     - redis-core
+  #   networks:
+  #     - core-network
 
   # Nginx Proxy Manager
   nginx-proxy-manager:

@@ -87,9 +87,9 @@ class Settings(BaseSettings):
     cache_ttl_embedding: int = Field(default=86400, ge=0)
     semantic_cache_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
     
-    # Celery
-    celery_broker_url: RedisDsn
-    celery_result_backend: RedisDsn
+    # Celery (Optional - only needed if Celery workers are enabled)
+    celery_broker_url: Optional[RedisDsn] = None
+    celery_result_backend: Optional[RedisDsn] = None
     celery_task_serializer: str = Field(default="json")
     celery_result_serializer: str = Field(default="json")
     celery_accept_content: List[str] = Field(default=["json"])

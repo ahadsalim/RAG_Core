@@ -45,6 +45,15 @@ class SyncStatusResponse(BaseModel):
     qdrant_status: Dict[str, Any]
 
 
+class SyncStatisticsResponse(BaseModel):
+    """Complete sync statistics response."""
+    timestamp: str
+    ingest_database: Dict[str, Any]
+    core_qdrant: Dict[str, Any]
+    sync_progress: Dict[str, Any]
+    summary: Dict[str, Any]
+
+
 # API key dependency
 async def verify_sync_api_key(api_key: str = Depends(verify_api_key)):
     """Verify API key for sync operations."""
@@ -216,6 +225,37 @@ async def delete_document_embeddings(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Delete failed: {str(e)}"
+        )
+
+
+# Get complete statistics
+@router.get("/statistics", response_model=SyncStatisticsResponse)
+async def get_sync_statistics(
+    api_key: str = Depends(verify_sync_api_key)
+):
+    """
+    Get complete synchronization statistics.
+    
+    Returns detailed statistics from both Ingest database and Core Qdrant,
+    including sync progress and transfer status.
+    """
+    try:
+        sync_service = SyncService()
+        stats = await sync_service.get_complete_statistics()
+        
+        return SyncStatisticsResponse(
+            timestamp=stats["timestamp"],
+            ingest_database=stats["ingest_database"],
+            core_qdrant=stats["core_qdrant"],
+            sync_progress=stats["sync_progress"],
+            summary=stats["summary"]
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get statistics: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get statistics: {str(e)}"
         )
 
 

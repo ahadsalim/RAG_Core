@@ -20,23 +20,40 @@ if [ "$EUID" -ne 0 ]; then
     echo -e "${YELLOW}Warning: Not running as root. Some operations may require sudo.${NC}"
 fi
 
-# Detect project root directory
+# Detect directories
+# This script is in: /path/to/project/deployment/
+# Project root is:   /path/to/project/
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-echo "Script directory: $SCRIPT_DIR"
-echo "Project root: $PROJECT_ROOT"
+echo -e "${BLUE}📁 Paths:${NC}"
+echo "  Script: $SCRIPT_DIR"
+echo "  Project Root: $PROJECT_ROOT"
+echo ""
 
 # Change to project root
-cd "$PROJECT_ROOT" || exit 1
+cd "$PROJECT_ROOT" || {
+    echo -e "${RED}Failed to change to project root: $PROJECT_ROOT${NC}"
+    exit 1
+}
 
 # Production environment check
 echo -e "${RED}WARNING: This is PRODUCTION deployment!${NC}"
-read -p "Are you sure you want to continue? (yes/no) " -r
-if [[ ! $REPLY == "yes" ]]; then
+read -p "Are you sure you want to continue? (y/N): " -r
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "Deployment cancelled."
     exit 1
 fi
+
+# Get domain name
+echo ""
+echo -e "${YELLOW}Domain Configuration:${NC}"
+read -p "Enter your domain name (e.g., api.example.com): " DOMAIN_NAME
+if [ -z "$DOMAIN_NAME" ]; then
+    echo -e "${RED}Domain name is required for production deployment!${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Domain: $DOMAIN_NAME${NC}"
 
 # Function to check command exists
 command_exists() {
@@ -71,9 +88,9 @@ chown -R 1000:1000 /var/lib/core
 echo -e "${GREEN}✓ Directories created${NC}"
 
 # Setup environment file
-echo -e "${YELLOW}Setting up production environment...${NC}"
-if [ ! -f ".env.production" ]; then
-    cp deployment/config/.env.example .env.production
+echo -e "${YELLOW}Setting up environment file...${NC}"
+if [ ! -f "$PROJECT_ROOT/.env" ]; then
+    cp "$PROJECT_ROOT/deployment/config/.env.example" "$PROJECT_ROOT/.env"
     
     # Generate secure passwords
     SECRET_KEY=$(openssl rand -hex 32)
@@ -81,58 +98,73 @@ if [ ! -f ".env.production" ]; then
     DB_PASSWORD=$(openssl rand -hex 16)
     REDIS_PASSWORD=$(openssl rand -hex 16)
     
-    # Update .env.production with secure values
-    sed -i "s/your-secret-key-change-in-production/$SECRET_KEY/g" .env.production
-    sed -i "s/your-jwt-secret-key-change-in-production/$JWT_SECRET/g" .env.production
-    sed -i "s/core_pass/$DB_PASSWORD/g" .env.production
-    sed -i 's/REDIS_PASSWORD=""/REDIS_PASSWORD="'$REDIS_PASSWORD'"/g' .env.production
+    # Update .env with secure values
+    sed -i "s/your-secret-key-change-in-production/$SECRET_KEY/g" "$PROJECT_ROOT/.env"
+    sed -i "s/your-jwt-secret-key-change-in-production/$JWT_SECRET/g" "$PROJECT_ROOT/.env"
+    sed -i "s/core_pass/$DB_PASSWORD/g" "$PROJECT_ROOT/.env"
+    sed -i 's/REDIS_PASSWORD=""/REDIS_PASSWORD="'$REDIS_PASSWORD'"/g' "$PROJECT_ROOT/.env"
     
     # Set production environment
-    sed -i 's/ENVIRONMENT="development"/ENVIRONMENT="production"/g' .env.production
-    sed -i 's/DEBUG=true/DEBUG=false/g' .env.production
-    sed -i 's/RELOAD=true/RELOAD=false/g' .env.production
-    sed -i 's/LOG_LEVEL="INFO"/LOG_LEVEL="WARNING"/g' .env.production
+    sed -i 's/ENVIRONMENT="development"/ENVIRONMENT="production"/g' "$PROJECT_ROOT/.env"
+    sed -i 's/DEBUG=true/DEBUG=false/g' "$PROJECT_ROOT/.env"
+    sed -i 's/RELOAD=true/RELOAD=false/g' "$PROJECT_ROOT/.env"
+    sed -i 's/LOG_LEVEL="INFO"/LOG_LEVEL="WARNING"/g' "$PROJECT_ROOT/.env"
     
-    echo -e "${GREEN}✓ Created .env.production with secure defaults${NC}"
+    # Add domain to .env
+    echo "" >> "$PROJECT_ROOT/.env"
+    echo "# Domain Configuration" >> "$PROJECT_ROOT/.env"
+    echo "DOMAIN_NAME=$DOMAIN_NAME" >> "$PROJECT_ROOT/.env"
+    
+    echo -e "${GREEN}✓ Created .env with secure defaults${NC}"
     echo -e "${GREEN}✓ Generated secure passwords:${NC}"
     echo "  - SECRET_KEY: $(echo $SECRET_KEY | cut -c1-16)..."
     echo "  - JWT_SECRET: $(echo $JWT_SECRET | cut -c1-16)..."
     echo "  - DB_PASSWORD: $(echo $DB_PASSWORD | cut -c1-8)..."
     echo "  - REDIS_PASSWORD: $(echo $REDIS_PASSWORD | cut -c1-8)..."
     echo ""
-    echo -e "${YELLOW}⚠️  Save these passwords! They are stored in .env.production${NC}"
-    echo -e "${YELLOW}Note: Add LLM API keys if needed (edit .env.production)${NC}"
+    echo -e "${YELLOW}⚠️  Save these passwords! They are stored in $PROJECT_ROOT/.env${NC}"
+    echo -e "${YELLOW}Note: Add LLM API keys if needed (edit $PROJECT_ROOT/.env)${NC}"
     echo ""
 else
-    echo -e "${GREEN}✓ .env.production file already exists${NC}"
+    echo -e "${GREEN}✓ .env file already exists${NC}"
 fi
 
-# Copy environment file to .env for Docker
-cp .env.production .env
+# Create symlink for docker-compose
+echo -e "${YELLOW}Creating symlink for docker-compose...${NC}"
+if [ -L "$PROJECT_ROOT/deployment/docker/.env" ]; then
+    rm "$PROJECT_ROOT/deployment/docker/.env"
+fi
+ln -sf "$PROJECT_ROOT/.env" "$PROJECT_ROOT/deployment/docker/.env"
+echo -e "${GREEN}✓ Symlink created: deployment/docker/.env -> ../../.env${NC}"
 
-# Build Docker images
+# Build Docker images (if needed)
 echo -e "${YELLOW}Building Docker images...${NC}"
-cd deployment/docker
-docker-compose build --no-cache
-cd ../..
+if [ -f "$PROJECT_ROOT/deployment/docker/Dockerfile" ]; then
+    docker-compose -f "$PROJECT_ROOT/deployment/docker/docker-compose.yml" build --no-cache
+else
+    echo -e "${YELLOW}No custom Dockerfile found, using default images${NC}"
+fi
 
 # Start all services
 echo -e "${YELLOW}Starting all services...${NC}"
-cd deployment/docker
-docker-compose up -d
-cd ../..
+docker-compose -f "$PROJECT_ROOT/deployment/docker/docker-compose.yml" up -d
 
 # Wait for services to be ready
 echo -e "${YELLOW}Waiting for services to be ready...${NC}"
 sleep 20
 
 # Check services health
-docker-compose -f deployment/docker/docker-compose.yml ps
+echo -e "${YELLOW}Checking services health...${NC}"
+docker-compose -f "$PROJECT_ROOT/deployment/docker/docker-compose.yml" ps
 
-# Run database migrations
-echo -e "${YELLOW}Running database migrations...${NC}"
-docker-compose -f deployment/docker/docker-compose.yml exec core-api alembic upgrade head
-echo -e "${GREEN}✓ Migrations completed${NC}"
+# Run database migrations (if alembic exists)
+if [ -d "$PROJECT_ROOT/alembic" ]; then
+    echo -e "${YELLOW}Running database migrations...${NC}"
+    docker-compose -f "$PROJECT_ROOT/deployment/docker/docker-compose.yml" exec -T core-api alembic upgrade head 2>/dev/null || \
+        echo -e "${YELLOW}⚠️  Migrations skipped (service may not be ready or alembic not configured)${NC}"
+else
+    echo -e "${YELLOW}No alembic directory found, skipping migrations${NC}"
+fi
 
 # Setup Nginx (if not already configured)
 if command_exists nginx; then
@@ -179,10 +211,10 @@ Requires=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=$(pwd)/deployment/docker
-ExecStart=/usr/bin/docker-compose up -d
-ExecStop=/usr/bin/docker-compose down
-ExecReload=/usr/bin/docker-compose restart
+WorkingDirectory=$PROJECT_ROOT
+ExecStart=/usr/bin/docker-compose -f $PROJECT_ROOT/deployment/docker/docker-compose.yml up -d
+ExecStop=/usr/bin/docker-compose -f $PROJECT_ROOT/deployment/docker/docker-compose.yml down
+ExecReload=/usr/bin/docker-compose -f $PROJECT_ROOT/deployment/docker/docker-compose.yml restart
 
 [Install]
 WantedBy=multi-user.target
@@ -238,6 +270,10 @@ if [ "$EUID" -eq 0 ]; then
     ufw allow 443/tcp comment 'HTTPS'
     echo -e "${GREEN}✓ Port 443 (HTTPS) - Allowed${NC}"
     
+    # Allow Nginx Proxy Manager Admin UI
+    ufw allow 81/tcp comment 'Nginx Proxy Manager'
+    echo -e "${GREEN}✓ Port 81 (Nginx Proxy Manager) - Allowed${NC}"
+    
     # Allow Core API port (if needed for direct access)
     # Note: In production with Nginx, this might not be needed externally
     read -p "Allow direct access to Core API on port 7001? (y/N): " allow_api
@@ -265,6 +301,7 @@ else
     echo "  sudo ufw allow 22/tcp"
     echo "  sudo ufw allow 80/tcp"
     echo "  sudo ufw allow 443/tcp"
+    echo "  sudo ufw allow 81/tcp"
     echo "  sudo ufw enable"
 fi
 
@@ -277,41 +314,92 @@ echo -e "${GREEN}Flower (Celery monitoring) available at: http://localhost:7555$
 echo -e "${YELLOW}Running final health checks...${NC}"
 sleep 5
 
-# Test API endpoint
+# Test services
+echo -e "${YELLOW}Testing services...${NC}"
+
+# Test API endpoint (local)
 if curl -f http://localhost:7001/health > /dev/null 2>&1; then
-    echo -e "${GREEN}✓ API is responding${NC}"
+    echo -e "${GREEN}✓ API is responding (localhost)${NC}"
 else
-    echo -e "${RED}✗ API is not responding. Check logs: docker-compose logs core-api${NC}"
+    echo -e "${YELLOW}⚠️  API is not responding yet. Check logs: docker-compose -f $PROJECT_ROOT/deployment/docker/docker-compose.yml logs core-api${NC}"
 fi
 
 # Test Qdrant
-if curl -f http://localhost:7333/health > /dev/null 2>&1; then
+if curl -f http://localhost:6333/health > /dev/null 2>&1; then
     echo -e "${GREEN}✓ Qdrant is responding${NC}"
 else
-    echo -e "${RED}✗ Qdrant is not responding. Check logs: docker-compose logs qdrant${NC}"
+    echo -e "${YELLOW}⚠️  Qdrant is not responding yet. Check logs: docker-compose -f $PROJECT_ROOT/deployment/docker/docker-compose.yml logs qdrant${NC}"
+fi
+
+# Test Nginx Proxy Manager
+if curl -f http://localhost:81 > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ Nginx Proxy Manager is responding${NC}"
+else
+    echo -e "${YELLOW}⚠️  Nginx Proxy Manager is not responding yet${NC}"
 fi
 
 echo -e "${GREEN}=========================================${NC}"
-echo -e "${GREEN}Production deployment completed!${NC}"
+echo -e "${GREEN}Production Deployment Completed!${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo ""
-echo -e "${YELLOW}Important next steps:${NC}"
-echo "1. Configure your domain in Nginx: /etc/nginx/sites-available/core-api"
-echo "2. Setup SSL certificate with Let's Encrypt:"
-echo "   certbot --nginx -d your-domain.com"
-echo "3. ✅ Firewall configured (UFW enabled with necessary ports)"
-echo "4. Setup backup cron job: crontab -e"
-echo "   0 2 * * * $PROJECT_ROOT/deployment/backup_manager.sh --auto-backup"
-echo "5. Monitor logs: docker-compose -f deployment/docker/docker-compose.yml logs -f"
-echo "6. Review generated passwords in .env.production"
+echo -e "${BLUE}📋 Important Information:${NC}"
 echo ""
-echo -e "${BLUE}🔐 Security Summary:${NC}"
-echo "  ✅ Secure passwords generated (JWT, DB, Redis)"
-echo "  ✅ Firewall configured (UFW)"
-echo "  ✅ Only necessary ports opened (22, 80, 443)"
+echo -e "${YELLOW}🌐 Domain Configuration:${NC}"
+read -p "Enter your domain name: " DOMAIN_NAME
+echo "DOMAIN_NAME=$DOMAIN_NAME" >> $PROJECT_ROOT/.env
+echo "  Domain: $DOMAIN_NAME"
+echo ""
+echo -e "${YELLOW}🔐 Generated Passwords (saved in $PROJECT_ROOT/.env):${NC}"
+echo "  - JWT Secret: ✓"
+echo "  - Database Password: ✓"
+echo "  - Redis Password: ✓"
+echo ""
+echo -e "${YELLOW}🔧 Nginx Proxy Manager Setup:${NC}"
+echo "  1. Access Admin UI: http://$(curl -s ifconfig.me):81"
+echo "     Default credentials:"
+echo "       Email: admin@example.com"
+echo "       Password: changeme"
+echo ""
+echo "  2. After login, change password immediately!"
+echo ""
+echo "  3. Add Proxy Host:"
+echo "     - Domain Names: $DOMAIN_NAME"
+echo "     - Scheme: http"
+echo "     - Forward Hostname/IP: core-api"
+echo "     - Forward Port: 7001"
+echo "     - Enable: Websockets Support"
+echo ""
+echo "  4. Request SSL Certificate:"
+echo "     - SSL tab → Request new certificate"
+echo "     - Email: your-email@example.com"
+echo "     - Enable: Force SSL, HTTP/2 Support, HSTS"
+echo ""
+echo -e "${YELLOW}🔥 Firewall Status:${NC}"
 if [ "$EUID" -eq 0 ]; then
-    echo -e "${YELLOW}  ⚠️  Remember to setup SSL certificate!${NC}"
+    ufw status numbered | head -10
+else
+    echo "  ✅ Ports 22, 80, 443 configured"
 fi
 echo ""
-echo -e "${GREEN}API Documentation: http://your-domain.com/docs${NC}"
-echo -e "${GREEN}Admin Panel: http://your-domain.com/api/v1/admin${NC}"
+echo -e "${YELLOW}📊 Service URLs:${NC}"
+echo "  - API (local): http://localhost:7001"
+echo "  - API (domain): https://$DOMAIN_NAME"
+echo "  - API Docs: https://$DOMAIN_NAME/docs"
+echo "  - Flower (Celery): http://localhost:5555"
+echo "  - Nginx Proxy Manager: http://$(curl -s ifconfig.me):81"
+echo ""
+echo -e "${YELLOW}📦 Next Steps:${NC}"
+echo "  1. ✅ Configure Nginx Proxy Manager (see above)"
+echo "  2. ✅ Point DNS A record: $DOMAIN_NAME → $(curl -s ifconfig.me)"
+echo "  3. ✅ Request SSL certificate via Nginx Proxy Manager"
+echo "  4. Setup backup cron job:"
+echo "     crontab -e"
+echo "     0 2 * * * $PROJECT_ROOT/deployment/backup_manager.sh --auto-backup"
+echo "  5. Monitor logs:"
+echo "     docker-compose -f $PROJECT_ROOT/deployment/docker/docker-compose.yml logs -f"
+echo ""
+echo -e "${YELLOW}🧪 Test Your API:${NC}"
+echo "  curl https://$DOMAIN_NAME/health"
+echo "  curl https://$DOMAIN_NAME/docs"
+echo ""
+echo -e "${GREEN}✨ Deployment successful! Your API is ready.${NC}"

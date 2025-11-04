@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     AsyncEngine
 )
-from sqlalchemy.pool import NullPool, QueuePool
 import structlog
 
 from app.config.settings import settings
@@ -40,7 +39,7 @@ async def init_db():
         max_overflow=settings.database_max_overflow,
         pool_timeout=settings.database_pool_timeout,
         pool_pre_ping=True,
-        poolclass=QueuePool,
+        # poolclass is automatically selected for async engines
     )
     
     core_session_factory = async_sessionmaker(
@@ -55,7 +54,7 @@ async def init_db():
         echo=False,
         pool_size=settings.ingest_database_pool_size,
         pool_pre_ping=True,
-        poolclass=QueuePool,
+        # poolclass is automatically selected for async engines
     )
     
     ingest_session_factory = async_sessionmaker(

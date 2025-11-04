@@ -67,6 +67,14 @@ if [ ! -f ".env" ]; then
     fi
 fi
 
+# Create symlink for docker-compose
+print_info "Creating symlink for docker-compose..."
+if [ -L "$PROJECT_ROOT/deployment/docker/.env" ]; then
+    rm "$PROJECT_ROOT/deployment/docker/.env"
+fi
+ln -sf "$PROJECT_ROOT/.env" "$PROJECT_ROOT/deployment/docker/.env"
+print_success "Symlink created: deployment/docker/.env -> ../../.env"
+
 print_info "Starting Development environment..."
 
 # Stop any running containers

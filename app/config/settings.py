@@ -20,6 +20,7 @@ class Settings(BaseSettings):
         env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="allow",  # Allow extra fields from .env
     )
     
     # Application
@@ -34,6 +35,7 @@ class Settings(BaseSettings):
     port: int = Field(default=7001)
     workers: int = Field(default=4)
     reload: bool = Field(default=False)
+    domain_name: Optional[str] = Field(default=None, description="Production domain name")
     
     # Security
     secret_key: str = Field(min_length=32)

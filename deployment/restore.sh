@@ -39,8 +39,8 @@ fi
 # Warning
 echo -e "${RED}WARNING: This will restore the system from backup!${NC}"
 echo -e "${RED}All current data will be overwritten!${NC}"
-read -p "Are you sure you want to continue? (yes/no) " -r
-if [[ ! $REPLY == "yes" ]]; then
+read -p "Are you sure you want to continue? (y/N): " -r
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "Restore cancelled."
     exit 1
 fi

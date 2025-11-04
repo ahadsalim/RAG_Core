@@ -23,12 +23,20 @@ RUN apt-get update && apt-get install -y \
 # Set work directory
 WORKDIR /app
 
-# Copy requirements
-COPY requirements.txt .
+# Copy requirements from deployment folder
+COPY deployment/requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies in stages to avoid resolution-too-deep
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Stage 1: Core dependencies (numpy first to avoid conflicts)
+RUN pip install --no-cache-dir "numpy>=1.24.3,<2.0.0"
+
+# Stage 2: Install from requirements with increased timeout and retries
+RUN pip install --no-cache-dir \
+    --timeout 300 \
+    --retries 5 \
+    -r requirements.txt
 
 # Copy application code
 COPY . .

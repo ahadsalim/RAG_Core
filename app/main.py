@@ -140,8 +140,9 @@ async def health_check() -> Dict[str, Any]:
     try:
         # Check database
         from app.db.session import get_session
+        from sqlalchemy import text
         async with get_session() as session:
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
         health_status["services"]["database"] = "healthy"
     except Exception as e:
         health_status["services"]["database"] = f"unhealthy: {str(e)}"

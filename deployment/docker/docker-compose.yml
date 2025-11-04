@@ -4,8 +4,8 @@ services:
   # Core API Service
   core-api:
     build:
-      context: .
-      dockerfile: docker/Dockerfile
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
     container_name: core-api
     ports:
       - "7001:7001"
@@ -22,11 +22,12 @@ services:
       - redis-core
       - qdrant
     volumes:
-      - ./:/app
+      - ../../:/app
+      - /app/data  # Exclude data directory to avoid permission issues
     command: uvicorn app.main:app --host 0.0.0.0 --port 7001 --reload
     networks:
       - core-network
-      - ingest-network  # To access ingest database
+      # Note: ingest database is external, no need for ingest-network
 
   # PostgreSQL for Core
   postgres-core:
@@ -90,8 +91,8 @@ services:
   # Celery Worker
   celery-worker:
     build:
-      context: .
-      dockerfile: docker/Dockerfile
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
     container_name: celery-worker
     environment:
       - ENVIRONMENT=development
@@ -104,7 +105,7 @@ services:
       - redis-core
       - postgres-core
     volumes:
-      - ./:/app
+      - ../../:/app
     command: celery -A app.celery worker --loglevel=info
     networks:
       - core-network
@@ -112,8 +113,8 @@ services:
   # Celery Beat (Scheduler)
   celery-beat:
     build:
-      context: .
-      dockerfile: docker/Dockerfile
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
     container_name: celery-beat
     environment:
       - ENVIRONMENT=development
@@ -123,17 +124,17 @@ services:
       - redis-core
       - postgres-core
     volumes:
-      - ./:/app
+      - ../../:/app
     command: celery -A app.celery beat --loglevel=info
     networks:
       - core-network
 
   # Flower (Celery Monitoring)
   flower:
-    image: mher/flower:latest
+    image: mher/flower:2.0.1
     container_name: flower
     ports:
-      - "7555:5555"
+      - "5555:5555"
     environment:
       - CELERY_BROKER_URL=redis://redis-core:6379/1
       - FLOWER_PORT=5555
@@ -141,6 +142,27 @@ services:
       - redis-core
     networks:
       - core-network
+
+  # Nginx Proxy Manager
+  nginx-proxy-manager:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx-proxy-manager
+    restart: unless-stopped
+    ports:
+      - "80:80"     # HTTP
+      - "443:443"   # HTTPS
+      - "81:81"     # Admin UI
+    environment:
+      - DB_SQLITE_FILE=/data/database.sqlite
+    volumes:
+      - ../../data/nginx-proxy-manager/data:/data
+      - ../../data/nginx-proxy-manager/letsencrypt:/etc/letsencrypt
+    networks:
+      - core-network
+    healthcheck:
+      test: ["CMD", "/bin/check-health"]
+      interval: 10s
+      timeout: 3s
 
 volumes:
   postgres-core-data:
@@ -150,5 +172,4 @@ volumes:
 networks:
   core-network:
     driver: bridge
-  ingest-network:
-    external: true  # Assumes ingest network exists
+  # ingest-network removed: ingest database is on external server

@@ -34,15 +34,21 @@ print_warning() {
     echo -e "${YELLOW}⚠️  $1${NC}"
 }
 
+# Detect directories
+# This script is in: /path/to/project/deployment/
+# Project root is:   /path/to/project/
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
 # Check for required files
 check_prerequisites() {
     local missing_files=()
     
-    if [ ! -f "deploy_development.sh" ]; then
+    if [ ! -f "$SCRIPT_DIR/deploy_development.sh" ]; then
         missing_files+=("deploy_development.sh")
     fi
     
-    if [ ! -f "deploy_production.sh" ]; then
+    if [ ! -f "$SCRIPT_DIR/deploy_production.sh" ]; then
         missing_files+=("deploy_production.sh")
     fi
     
@@ -57,13 +63,13 @@ check_prerequisites() {
 
 # Check and create .env file with secure defaults
 check_env_file() {
-    if [ ! -f "../.env" ]; then
+    if [ ! -f "$PROJECT_ROOT/.env" ]; then
         print_warning ".env file not found!"
         print_info "Creating .env from template..."
         
-        if [ -f "config/.env.example" ]; then
+        if [ -f "$SCRIPT_DIR/config/.env.example" ]; then
             # Copy template
-            cp config/.env.example ../.env
+            cp "$SCRIPT_DIR/config/.env.example" "$PROJECT_ROOT/.env"
             
             # Generate secure random values
             SECRET_KEY=$(openssl rand -hex 32)
@@ -72,10 +78,10 @@ check_env_file() {
             REDIS_PASSWORD=$(openssl rand -hex 16)
             
             # Update .env with secure values
-            sed -i "s/your-secret-key-change-in-production/$SECRET_KEY/g" ../.env
-            sed -i "s/your-jwt-secret-key-change-in-production/$JWT_SECRET/g" ../.env
-            sed -i "s/core_pass/$DB_PASSWORD/g" ../.env
-            sed -i 's/REDIS_PASSWORD=""/REDIS_PASSWORD="'$REDIS_PASSWORD'"/g' ../.env
+            sed -i "s/your-secret-key-change-in-production/$SECRET_KEY/g" "$PROJECT_ROOT/.env"
+            sed -i "s/your-jwt-secret-key-change-in-production/$JWT_SECRET/g" "$PROJECT_ROOT/.env"
+            sed -i "s/core_pass/$DB_PASSWORD/g" "$PROJECT_ROOT/.env"
+            sed -i 's/REDIS_PASSWORD=""/REDIS_PASSWORD="'$REDIS_PASSWORD'"/g' "$PROJECT_ROOT/.env"
             
             print_success ".env file created with secure defaults"
             print_info "Generated secure passwords:"
@@ -84,7 +90,7 @@ check_env_file() {
             echo "  ✓ Redis Password"
             echo ""
             print_warning "⚠️  If you need LLM API keys (OpenAI, Groq, etc.), edit .env:"
-            echo "  nano ../.env"
+            echo "  nano $PROJECT_ROOT/.env"
             echo "  Then set: LLM_API_KEY=your-key"
             echo ""
         else
@@ -132,7 +138,7 @@ case $choice in
         echo ""
         read -p "Continue? (Y/n): " confirm
         if [[ ! $confirm =~ ^[Nn]$ ]]; then
-            if chmod +x deploy_development.sh && ./deploy_development.sh; then
+            if chmod +x "$SCRIPT_DIR/deploy_development.sh" && "$SCRIPT_DIR/deploy_development.sh"; then
                 print_success "Development environment deployed successfully!"
                 echo ""
                 print_header "🎉 System Ready!"
@@ -168,9 +174,9 @@ case $choice in
         echo ""
         print_error "This requires root access and will modify system configuration"
         echo ""
-        read -p "Are you absolutely sure? (type 'yes' to continue): " confirm
-        if [[ $confirm == "yes" ]]; then
-            if chmod +x deploy_production.sh && sudo ./deploy_production.sh; then
+        read -p "Are you absolutely sure? (y/N): " confirm
+        if [[ $confirm =~ ^[Yy]$ ]]; then
+            if chmod +x "$SCRIPT_DIR/deploy_production.sh" && sudo "$SCRIPT_DIR/deploy_production.sh"; then
                 print_success "Production environment deployed successfully!"
                 echo ""
                 print_header "🎉 Production System Ready!"
@@ -187,7 +193,7 @@ case $choice in
                 exit 1
             fi
         else
-            print_error "Deployment cancelled (you must type 'yes' to continue)"
+            print_error "Deployment cancelled"
             exit 0
         fi
         ;;
@@ -203,8 +209,8 @@ echo ""
 print_header "📚 Useful Resources"
 echo ""
 echo "🛠️  Management Tools:"
-[ -f "backup_manager.sh" ] && echo "  💾 Backup Manager: ./backup_manager.sh"
-echo "  📊 Monitor: docker-compose -f docker/docker-compose.yml ps"
+[ -f "$SCRIPT_DIR/backup_manager.sh" ] && echo "  💾 Backup Manager: $SCRIPT_DIR/backup_manager.sh"
+echo "  📊 Monitor: docker-compose -f $PROJECT_ROOT/deployment/docker/docker-compose.yml ps"
 echo ""
 echo "📖 Documentation:"
 echo "  📄 Quick Start: ../QUICK_START.md"

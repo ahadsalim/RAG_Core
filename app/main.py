@@ -78,9 +78,9 @@ app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description="RAG Engine and AI Processing System for Legal Document Q&A",
-    docs_url="/docs" if settings.debug else None,
-    redoc_url="/redoc" if settings.debug else None,
-    openapi_url="/openapi.json" if settings.debug else None,
+    docs_url="/docs",  # همیشه فعال
+    redoc_url="/redoc",  # همیشه فعال
+    openapi_url="/openapi.json",  # همیشه فعال
     lifespan=lifespan,
 )
 

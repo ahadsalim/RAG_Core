@@ -148,13 +148,18 @@ class QdrantService:
             points = []
             for emb in embeddings:
                 # Generate UUID if not provided
-                point_id = emb.get("id", str(uuid.uuid4()))
-                if isinstance(point_id, str):
-                    # Convert string to UUID-like int
-                    point_id = int(hashlib.md5(point_id.encode()).hexdigest()[:16], 16)
+                original_id = emb.get("id", str(uuid.uuid4()))
+                
+                # Convert string UUID to numeric ID for Qdrant
+                if isinstance(original_id, str):
+                    # Convert string to UUID-like int using MD5 hash
+                    numeric_id = int(hashlib.md5(original_id.encode()).hexdigest()[:16], 16)
+                else:
+                    numeric_id = original_id
                 
                 # Prepare payload
                 payload = {
+                    "node_id": original_id,  # ذخیره UUID اصلی در payload
                     "text": emb["text"],
                     "document_id": emb.get("document_id"),
                     "document_type": emb.get("document_type"),
@@ -167,7 +172,7 @@ class QdrantService:
                 
                 # Create point
                 point = PointStruct(
-                    id=point_id,
+                    id=numeric_id,  # استفاده از numeric_id
                     vector={vector_field: emb["vector"]},
                     payload=payload
                 )
@@ -189,6 +194,41 @@ class QdrantService:
         except Exception as e:
             logger.error(f"Failed to upsert embeddings: {e}")
             raise
+    
+    async def get_point(self, point_id: str):
+        """
+        Retrieve a single point from Qdrant by ID.
+        
+        Args:
+            point_id: The ID of the point to retrieve
+            
+        Returns:
+            Point object or None if not found
+        """
+        try:
+            import hashlib
+            
+            # Convert string ID to int (same logic as upsert)
+            if isinstance(point_id, str):
+                numeric_id = int(hashlib.md5(point_id.encode()).hexdigest()[:16], 16)
+            else:
+                numeric_id = point_id
+            
+            # Retrieve the point
+            points = self.client.retrieve(
+                collection_name=self.collection_name,
+                ids=[numeric_id],
+                with_payload=True,
+                with_vectors=True
+            )
+            
+            if points and len(points) > 0:
+                return points[0]
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve point {point_id}: {e}")
+            return None
     
     async def search(
         self,

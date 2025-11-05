@@ -6,7 +6,7 @@ Endpoints for syncing data from Ingest system
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 import structlog
@@ -53,15 +53,28 @@ class SyncStatisticsResponse(BaseModel):
     summary: Dict[str, Any]
 
 
+class NodeDetailResponse(BaseModel):
+    """Detailed information about a single node."""
+    node_id: str
+    exists: bool
+    vector: Optional[list[float]] = None
+    text: Optional[str] = None
+    document_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    vector_dimensions: Optional[Dict[str, int]] = None  # Available vector fields and their dims
+
+
 # API key dependency
-async def verify_sync_api_key(api_key: str = Depends(verify_api_key)):
+async def verify_sync_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
     """Verify API key for sync operations."""
-    if not api_key:
+    if not verify_api_key(x_api_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="API key required"
+            detail="Invalid API key"
         )
-    return api_key
+    return x_api_key
 
 
 # Sync embeddings endpoint
@@ -81,6 +94,8 @@ async def sync_embeddings(
         
         # Process embeddings
         embeddings_data = []
+        node_ids = []  # Track node IDs
+        
         for emb in request.embeddings:
             embeddings_data.append({
                 "id": emb.id,
@@ -89,6 +104,7 @@ async def sync_embeddings(
                 "document_id": emb.document_id,
                 "metadata": emb.metadata
             })
+            node_ids.append(emb.id)
         
         # Sync to Qdrant (using "medium" vector field for 768-dim embeddings)
         synced_count = await sync_service.qdrant_service.upsert_embeddings(
@@ -104,6 +120,7 @@ async def sync_embeddings(
         return {
             "status": "success",
             "synced_count": synced_count,
+            "node_ids": node_ids,  # Return list of node IDs
             "timestamp": datetime.utcnow().isoformat()
         }
         
@@ -256,6 +273,86 @@ async def get_sync_statistics(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get statistics: {str(e)}"
+        )
+
+
+# Get node details by ID
+@router.get("/node/{node_id}", response_model=NodeDetailResponse)
+async def get_node_details(
+    node_id: str,
+    api_key: str = Depends(verify_sync_api_key)
+):
+    """
+    Get complete information about a specific node in Qdrant.
+    
+    This endpoint allows Ingest system to verify that data was correctly
+    sent and stored in Core system.
+    
+    Args:
+        node_id: The UUID of the node to retrieve
+        api_key: API key for authentication (X-API-Key header)
+    
+    Returns:
+        Complete node information including vector, text, metadata
+    """
+    try:
+        from app.services.qdrant_service import QdrantService
+        
+        qdrant_service = QdrantService()
+        
+        # Retrieve the point from Qdrant
+        point = await qdrant_service.get_point(node_id)
+        
+        if not point:
+            return NodeDetailResponse(
+                node_id=node_id,
+                exists=False
+            )
+        
+        # Extract vector dimensions info
+        vector_dims = {}
+        if hasattr(point, 'vector') and point.vector:
+            if isinstance(point.vector, dict):
+                # Named vectors
+                for name, vec in point.vector.items():
+                    if isinstance(vec, list):
+                        vector_dims[name] = len(vec)
+            elif isinstance(point.vector, list):
+                # Single default vector
+                vector_dims['default'] = len(point.vector)
+        
+        # Get the primary vector (medium for 768-dim or default)
+        primary_vector = None
+        if hasattr(point, 'vector') and point.vector:
+            if isinstance(point.vector, dict):
+                # Try to get 'medium' first (768-dim), then 'default'
+                primary_vector = point.vector.get('medium') or point.vector.get('default')
+            elif isinstance(point.vector, list):
+                primary_vector = point.vector
+        
+        # Extract payload
+        payload = point.payload if hasattr(point, 'payload') else {}
+        
+        # Get original node_id from payload (if stored) or use the provided one
+        original_node_id = payload.get('node_id', node_id)
+        
+        return NodeDetailResponse(
+            node_id=original_node_id,  # برگرداندن UUID اصلی
+            exists=True,
+            vector=primary_vector,
+            text=payload.get('text'),
+            document_id=payload.get('document_id'),
+            metadata=payload.get('metadata', {}),
+            created_at=payload.get('created_at'),
+            updated_at=payload.get('updated_at'),
+            vector_dimensions=vector_dims
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get node details: {e}", node_id=node_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve node: {str(e)}"
         )
 
 

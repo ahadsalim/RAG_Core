@@ -5,6 +5,7 @@ FastAPI application setup with middleware, routers, and event handlers
 
 from contextlib import asynccontextmanager
 from typing import Any, Dict
+from datetime import datetime
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -170,6 +171,53 @@ async def health_check() -> Dict[str, Any]:
         health_status["status"] = "degraded"
     
     return health_status
+
+
+# Report endpoint - Qdrant statistics
+@app.get("/report", tags=["Report"])
+async def report() -> Dict[str, Any]:
+    """
+    Report endpoint showing Qdrant statistics.
+    Similar to /health but focused on data metrics.
+    """
+    try:
+        qdrant_service = QdrantService()
+        
+        # Get collection info
+        collection_info = await qdrant_service.get_collection_info()
+        
+        # Get basic stats
+        total_points = collection_info.get("points_count", 0)
+        vectors_count = collection_info.get("vectors_count", 0)
+        indexed_vectors = collection_info.get("indexed_vectors_count", 0)
+        
+        return {
+            "status": "ok",
+            "timestamp": datetime.utcnow().isoformat(),
+            "qdrant": {
+                "collection": collection_info.get("collection_name", "legal_documents"),
+                "total_nodes": total_points,  # تعداد نودها
+                "total_vectors": vectors_count,
+                "indexed_vectors": indexed_vectors,
+                "status": collection_info.get("status", "unknown"),
+            },
+            "summary": {
+                "total_documents": total_points,
+                "message": f"{total_points:,} documents indexed in Qdrant"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Report endpoint failed: {e}")
+        return {
+            "status": "error",
+            "timestamp": datetime.utcnow().isoformat(),
+            "error": str(e),
+            "qdrant": {
+                "total_nodes": 0,
+                "status": "unavailable"
+            }
+        }
 
 
 # Global exception handler

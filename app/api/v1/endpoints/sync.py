@@ -30,12 +30,21 @@ class EmbeddingData(BaseModel):
         vector: Embedding vector (768-dim for multilingual-e5-base)
         text: Full text content of the document chunk
         document_id: ID of the source document
+        document_type: Type of document (LAW, REGULATION, etc.)
+        chunk_index: Index of this chunk in the document
+        language: Language code (fa, en, etc.)
+        source: Source system (ingest, manual, etc.)
         metadata: Additional metadata (work_title, doc_type, etc.)
     """
     id: str = Field(..., description="Unique UUID for this embedding")
     vector: list[float] = Field(..., description="Embedding vector (768 dimensions)")
     text: str = Field(..., description="Full text content")
     document_id: str = Field(..., description="Source document ID")
+    document_type: Optional[str] = Field(None, description="Document type (LAW, REGULATION, etc.)")
+    chunk_index: Optional[int] = Field(None, description="Chunk index in document")
+    language: Optional[str] = Field("fa", description="Language code (fa, en, etc.)")
+    source: Optional[str] = Field("ingest", description="Source system")
+    created_at: Optional[str] = Field(None, description="Creation timestamp")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
@@ -181,6 +190,11 @@ async def sync_embeddings(
                 "vector": emb.vector,
                 "text": emb.text,
                 "document_id": emb.document_id,
+                "document_type": emb.document_type,
+                "chunk_index": emb.chunk_index,
+                "language": emb.language,
+                "source": emb.source,
+                "created_at": emb.created_at,
                 "metadata": emb.metadata
             })
             node_ids.append(emb.id)
@@ -297,12 +311,24 @@ async def process_sync_queue(
 
 
 # Delete document embeddings
-@router.delete("/document/{document_id}")
+@router.delete("/document/{document_id}", tags=["Sync"])
 async def delete_document_embeddings(
     document_id: str,
     api_key: str = Depends(verify_sync_api_key)
 ):
-    """Delete all embeddings for a specific document."""
+    """
+    Delete all embeddings for a specific document.
+    
+    **Authentication:** Requires API Key in X-API-Key header
+    
+    **Parameters:**
+    - document_id: The document ID whose embeddings should be deleted
+    
+    **Returns:**
+    - status: "success" or "failed"
+    - document_id: The document ID that was deleted
+    - deleted: Number of embeddings deleted
+    """
     try:
         sync_service = SyncService()
         deleted = await sync_service.qdrant_service.delete_by_document_id(
@@ -320,6 +346,159 @@ async def delete_document_embeddings(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Delete failed: {str(e)}"
+        )
+
+
+# Delete single node by node_id
+@router.delete("/node/{node_id}", tags=["Sync"])
+async def delete_node(
+    node_id: str,
+    api_key: str = Depends(verify_sync_api_key)
+):
+    """
+    Delete a single node from Qdrant by its node_id.
+    
+    This allows Ingest to delete a specific node using the same UUID
+    it used when creating the node.
+    
+    **Authentication:** Requires API Key in X-API-Key header
+    
+    **Parameters:**
+    - node_id: The UUID of the node to delete (same as sent by Ingest)
+    
+    **Returns:**
+    - status: "success" or "failed"
+    - node_id: The node ID that was deleted
+    - deleted: True if deleted, False if not found
+    
+    **Example:**
+    ```bash
+    DELETE /api/v1/sync/node/550e8400-e29b-41d4-a716-446655440000
+    Header: X-API-Key: ...
+    ```
+    
+    **Response:**
+    ```json
+    {
+      "status": "success",
+      "node_id": "550e8400-e29b-41d4-a716-446655440000",
+      "deleted": true
+    }
+    ```
+    """
+    try:
+        from app.services.qdrant_service import QdrantService
+        
+        qdrant_service = QdrantService()
+        deleted = await qdrant_service.delete_point(node_id)
+        
+        return {
+            "status": "success" if deleted else "failed",
+            "node_id": node_id,
+            "deleted": deleted
+        }
+        
+    except Exception as e:
+        logger.error(f"Delete node failed: {e}", node_id=node_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete node: {str(e)}"
+        )
+
+
+# Update single node by node_id
+@router.put("/node/{node_id}", tags=["Sync"])
+async def update_node(
+    node_id: str,
+    request: EmbeddingData,
+    api_key: str = Depends(verify_sync_api_key)
+):
+    """
+    Update a single node in Qdrant by its node_id.
+    
+    This allows Ingest to update a specific node using the same UUID.
+    The update is performed using upsert, so if the node doesn't exist,
+    it will be created.
+    
+    **Authentication:** Requires API Key in X-API-Key header
+    
+    **Parameters:**
+    - node_id: The UUID of the node to update (must match request.id)
+    - request: Updated embedding data
+    
+    **Returns:**
+    - status: "success" or "failed"
+    - node_id: The node ID that was updated
+    - action: "updated" or "created"
+    
+    **Example:**
+    ```bash
+    PUT /api/v1/sync/node/550e8400-e29b-41d4-a716-446655440000
+    Header: X-API-Key: ...
+    Body: {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "vector": [0.123, ...],
+      "text": "متن جدید",
+      "document_id": "doc-123",
+      "metadata": {...}
+    }
+    ```
+    
+    **Response:**
+    ```json
+    {
+      "status": "success",
+      "node_id": "550e8400-e29b-41d4-a716-446655440000",
+      "action": "updated"
+    }
+    ```
+    """
+    try:
+        # Validate that node_id matches request.id
+        if node_id != request.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"node_id in URL ({node_id}) must match id in request body ({request.id})"
+            )
+        
+        from app.services.qdrant_service import QdrantService
+        
+        qdrant_service = QdrantService()
+        
+        # Check if node exists
+        existing = await qdrant_service.get_point(node_id)
+        action = "updated" if existing else "created"
+        
+        # Upsert the node
+        await qdrant_service.upsert_embeddings(
+            [{
+                "id": request.id,
+                "vector": request.vector,
+                "text": request.text,
+                "document_id": request.document_id,
+                "document_type": request.document_type,
+                "chunk_index": request.chunk_index,
+                "language": request.language,
+                "source": request.source,
+                "created_at": request.created_at,
+                "metadata": request.metadata
+            }],
+            vector_field="medium"
+        )
+        
+        return {
+            "status": "success",
+            "node_id": node_id,
+            "action": action
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update node failed: {e}", node_id=node_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update node: {str(e)}"
         )
 
 

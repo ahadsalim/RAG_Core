@@ -230,6 +230,38 @@ class QdrantService:
             logger.error(f"Failed to retrieve point {point_id}: {e}")
             return None
     
+    async def delete_point(self, point_id: str) -> bool:
+        """
+        Delete a single point from Qdrant by node_id.
+        
+        Args:
+            point_id: The node_id (UUID) of the point to delete
+            
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        try:
+            import hashlib
+            
+            # Convert string ID to int (same logic as upsert)
+            if isinstance(point_id, str):
+                numeric_id = int(hashlib.md5(point_id.encode()).hexdigest()[:16], 16)
+            else:
+                numeric_id = point_id
+            
+            # Delete the point
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=[numeric_id]
+            )
+            
+            logger.info(f"Deleted point {point_id} from Qdrant")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to delete point {point_id}: {e}")
+            return False
+    
     async def search(
         self,
         query_vector: List[float],

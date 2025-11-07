@@ -1,43 +1,23 @@
-# 📚 Core System - RAG Engine Documentation
+# 📚 Core System - RAG Engine
 
 سیستم Core مغز متفکر و موتور پردازشی پروژه RAG است که مسئول پردازش سوالات کاربران و تولید پاسخ‌های هوشمند با استفاده از اطلاعات موجود در سیستم است.
 
 ---
 
-## 🚀 شروع سریع
+## 📖 مستندات
 
-**برای راهنمای کامل و جامع، فایل زیر را مطالعه کنید:**
+**تمام اطلاعات در یک فایل:**
 
-### 📖 [CORE_COMPLETE_GUIDE.md](./CORE_COMPLETE_GUIDE.md)
-راهنمای جامع شامل:
-- راه‌اندازی و نصب
-- API Documentation کامل
-- یکپارچه‌سازی با Ingest
-- تنظیمات LLM و Embedding
-- نکات بهینه‌سازی
-- Troubleshooting
+### [CORE_COMPLETE_GUIDE.md](./CORE_COMPLETE_GUIDE.md)
 
----
-
-## 📑 مستندات تخصصی
-
-### برای توسعه‌دهندگان Ingest:
-- **[INGEST_INTEGRATION_GUIDE.md](./INGEST_INTEGRATION_GUIDE.md)** - راهنمای یکپارچه‌سازی
-- **[INGEST_NODE_API_GUIDE.md](./INGEST_NODE_API_GUIDE.md)** - API نمایش نود
-- **[NODE_CRUD_OPERATIONS.md](./NODE_CRUD_OPERATIONS.md)** - عملیات CRUD
-
-### برای تنظیمات پیشرفته:
-- **[LLM_SETUP_GUIDE.md](./LLM_SETUP_GUIDE.md)** - تنظیم مدل‌های زبانی
-- **[LOCAL_EMBEDDING_GUIDE.md](./LOCAL_EMBEDDING_GUIDE.md)** - تنظیم Embedding محلی
-- **[QDRANT_OPTIMAL_STRUCTURE.md](./QDRANT_OPTIMAL_STRUCTURE.md)** - بهینه‌سازی Qdrant
-
-### مرجع API:
-- **[API_LIST.md](./API_LIST.md)** - لیست کامل API ها
-- **[CORE_STATISTICS_API.md](./CORE_STATISTICS_API.md)** - API آمارگیری
-
-### راه‌اندازی سریع:
-- **[QUICK_START.md](./QUICK_START.md)** - نصب و راه‌اندازی سریع
-- **[API_KEYS_SETUP.md](./API_KEYS_SETUP.md)** - تنظیم API Keys
+شامل:
+- ✅ معرفی و معماری
+- ✅ راه‌اندازی (Docker & Local)
+- ✅ API Documentation کامل
+- ✅ یکپارچه‌سازی با Ingest
+- ✅ عملیات CRUD روی نودها
+- ✅ تنظیمات LLM و Embedding
+- ✅ بهینه‌سازی و Troubleshooting
 
 ---
 

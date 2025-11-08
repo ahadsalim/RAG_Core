@@ -26,20 +26,30 @@
 - ✅ Multi-LLM Support (OpenAI, Anthropic, Local)
 - ✅ Hybrid Search (Vector + Keyword)
 - ✅ Re-ranking با Cohere
-- ✅ Semantic Cache برای سرعت بیشتر
+- ✅ Multi-Layer Caching (Memory + Redis + DB)
+- ✅ Real Streaming Responses
 - ✅ User Management & Authentication
 - ✅ Conversation History
 - ✅ API-First Architecture
+- ✅ N+1 Query Optimization
 
 ### 🛡️ امنیت
-- JWT Authentication
-- API Key Verification
-- Rate Limiting
+- JWT Authentication با SHA-256 Hashing
+- API Key Verification با Timing Attack Protection
+- Advanced Rate Limiting (Sliding Window)
+  - Per-minute, per-hour, per-day limits
+  - Tier-based limits (FREE, BASIC, PREMIUM, ENTERPRISE)
+- Custom Exception Handling
 - Input Validation
 - Audit Logging
 
 ### 📊 مانیتورینگ
-- Prometheus Metrics
+- Prometheus Metrics (جامع)
+  - Query metrics
+  - Cache hit/miss rates
+  - Rate limit violations
+  - LLM usage tracking
+  - Vector database operations
 - Structured Logging
 - Health Checks
 - Admin Dashboard
@@ -91,11 +101,19 @@ core/
 │
 ├── app/                     # 💻 کد اصلی برنامه
 │   ├── api/                # API endpoints
-│   ├── core/               # Security & dependencies
+│   │   └── v1/endpoints/  # Query, Admin, Sync endpoints
+│   ├── core/               # Security & Core Components
+│   │   ├── security.py    # JWT & API Key verification
+│   │   ├── rate_limiter.py # Advanced rate limiting
+│   │   ├── cache_manager.py # Multi-layer caching
+│   │   ├── exceptions.py  # Custom exceptions
+│   │   ├── metrics.py     # Prometheus metrics
+│   │   └── dependencies.py # FastAPI dependencies
 │   ├── db/                 # Database management
 │   ├── llm/                # LLM providers
 │   ├── models/             # SQLAlchemy models
 │   ├── rag/                # RAG pipeline
+│   │   └── pipeline.py    # Main RAG logic + streaming
 │   ├── services/           # Business services
 │   └── utils/              # Utilities
 │
@@ -121,7 +139,8 @@ core/
 | **[QUICK_START.md](QUICK_START.md)** | شروع سریع در 5 دقیقه |
 | **[document/API_KEYS_SETUP.md](document/API_KEYS_SETUP.md)** | راهنمای تنظیم API Keys |
 | **[document/INGEST_INTEGRATION_GUIDE.md](document/INGEST_INTEGRATION_GUIDE.md)** | یکپارچه‌سازی با Ingest |
-| **[document/USERS_SYSTEM_NOTES.md](document/USERS_SYSTEM_NOTES.md)** | راهنمای سیستم Users |
+| **[document/USERS_INTEGRATION_GUIDE.md](document/USERS_INTEGRATION_GUIDE.md)** | راهنمای کامل یکپارچه‌سازی با Users |
+| **[document/USERS_SYSTEM_NOTES.md](document/USERS_SYSTEM_NOTES.md)** | یادداشت‌های سیستم Users |
 
 ### 🎯 مستندات API
 
@@ -158,19 +177,43 @@ firefox /home/ahad/project/users/index.html
 # Health Check
 curl http://localhost:7001/health
 
-# ارسال Query
+# ارسال Query (Non-Streaming)
 curl -X POST http://localhost:7001/api/v1/query \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -d '{
-    "query": "حقوق کارگر چقدر است؟",
+    "query": "ماده 10 قانون مدنی چیست؟",
     "language": "fa",
-    "max_results": 5
+    "max_results": 5,
+    "use_cache": true,
+    "use_reranking": true
   }'
 
-# مشاهده آمار
+# ارسال Query (Streaming)
+curl -X POST http://localhost:7001/api/v1/query/stream \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "query": "قانون کار چیست؟",
+    "language": "fa"
+  }'
+
+# ارسال Feedback
+curl -X POST http://localhost:7001/api/v1/query/feedback \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "message_id": "uuid-here",
+    "rating": 5,
+    "feedback_type": "helpful"
+  }'
+
+# مشاهده آمار (Admin)
 curl http://localhost:7001/api/v1/admin/stats \
   -H "X-API-Key: YOUR_API_KEY"
+
+# Prometheus Metrics
+curl http://localhost:7001/metrics
 ```
 
 ## مدیریت سیستم
@@ -223,7 +266,9 @@ docker-compose -f deployment/docker/docker-compose.yml restart
 docker-compose -f deployment/docker/docker-compose.yml up -d --build
 ```
 
-## یکپارچه‌سازی با Ingest
+## یکپارچه‌سازی با سیستم‌های دیگر
+
+### 🔗 یکپارچه‌سازی با Ingest System
 
 تغییرات لازم در سیستم Ingest **اعمال شده است**:
 
@@ -232,7 +277,7 @@ docker-compose -f deployment/docker/docker-compose.yml up -d --build
 ✅ Celery tasks پیکربندی شده
 ✅ اسکریپت تست ایجاد شده
 
-### مراحل فعال‌سازی در Ingest:
+#### مراحل فعال‌سازی در Ingest:
 
 ```bash
 cd /home/ahad/project/ingest
@@ -251,6 +296,122 @@ python deployment/test_core_connection.py
 ```
 
 📄 **جزئیات کامل**: `/home/ahad/project/ingest/CORE_INTEGRATION_APPLIED.md`
+
+---
+
+### 👥 یکپارچه‌سازی با Users System
+
+سیستم Core برای اتصال به سیستم مدیریت کاربران طراحی شده است.
+
+#### معماری ارتباط:
+
+```
+Users System → JWT Token → Core System
+     ↓                          ↓
+  Login/Register          Query Processing
+  Tier Management         Rate Limiting
+  User Profile            Conversation History
+```
+
+#### مراحل اتصال:
+
+**1. تنظیم JWT Secret Key (مهم!)**
+
+```bash
+# در سیستم Users خود، فایل .env ایجاد کنید:
+JWT_SECRET_KEY="X4eHq1k/FUpfdAuxlCcwLZsoVvzk3YQLY5uFHeKlmNEKttv6KCha172oibsalOGq"
+JWT_ALGORITHM="HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# آدرس Core System
+CORE_API_URL="http://localhost:7001"
+```
+
+⚠️ **نکته**: `JWT_SECRET_KEY` باید دقیقاً با کلید Core یکسان باشد!
+
+**2. تولید JWT Token در Users System**
+
+```python
+from jose import jwt
+from datetime import datetime, timedelta
+
+def create_access_token(user_id: str, tier: str = "FREE"):
+    payload = {
+        "sub": user_id,  # User ID (الزامی)
+        "tier": tier,    # FREE, BASIC, PREMIUM, ENTERPRISE
+        "iat": datetime.utcnow(),
+        "exp": datetime.utcnow() + timedelta(minutes=30)
+    }
+    
+    token = jwt.encode(
+        payload,
+        JWT_SECRET_KEY,  # همان کلید Core
+        algorithm="HS256"
+    )
+    return token
+```
+
+**3. ارسال Query به Core**
+
+```python
+import httpx
+
+async def send_query_to_core(jwt_token: str, query: str):
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "http://localhost:7001/api/v1/query",
+            headers={"Authorization": f"Bearer {jwt_token}"},
+            json={
+                "query": query,
+                "language": "fa",
+                "max_results": 5
+            }
+        )
+        return response.json()
+```
+
+**4. مدیریت User Tiers**
+
+Core از 4 سطح کاربری پشتیبانی می‌کند:
+
+| Tier | Per Minute | Per Hour | Per Day |
+|------|------------|----------|---------|
+| FREE | 5 | 50 | 100 |
+| BASIC | 10 | 200 | 1000 |
+| PREMIUM | 30 | 1000 | 10000 |
+| ENTERPRISE | 100 | 5000 | 50000 |
+
+```python
+# در Users System: تغییر tier کاربر
+user.tier = "PREMIUM"
+await db.commit()
+
+# Core خودکار محدودیت‌های جدید را اعمال می‌کند
+```
+
+**5. مدیریت Conversation**
+
+```python
+# شروع مکالمه جدید
+response1 = await send_query_to_core(token, "سوال اول")
+conversation_id = response1["conversation_id"]
+
+# ادامه همان مکالمه
+response2 = await send_query_to_core(
+    token, 
+    "سوال دوم",
+    conversation_id=conversation_id
+)
+```
+
+#### نکات امنیتی:
+
+- ✅ JWT Token را در HTTPS ارسال کنید
+- ✅ Token expiration را رعایت کنید (30 دقیقه)
+- ✅ SECRET_KEY را در `.env` نگهداری کنید (نه در کد)
+- ✅ `.env` را در `.gitignore` قرار دهید
+
+📄 **راهنمای کامل**: [document/USERS_INTEGRATION_GUIDE.md](document/USERS_INTEGRATION_GUIDE.md)
 
 ## تنظیمات API Keys
 
@@ -334,12 +495,35 @@ docker-compose logs qdrant
 - 📖 [راهنمای شروع سریع](QUICK_START.md)
 - 🔑 [تنظیم API Keys](document/API_KEYS_SETUP.md)
 - 🔗 [یکپارچه‌سازی Ingest](document/INGEST_INTEGRATION_GUIDE.md)
-- 👥 [راهنمای Users](document/USERS_SYSTEM_NOTES.md)
+- 👥 [راهنمای کامل Users Integration](document/USERS_INTEGRATION_GUIDE.md)
 - 💾 [Backup & Restore](deployment/backup_manager.sh)
 - 🧪 [Test UI](../users/index.html)
+- 📊 [API Documentation](http://localhost:7001/docs)
 
 ---
 
-**نسخه**: 1.0.0  
-**آخرین بروزرسانی**: نوامبر 2024  
-**وضعیت**: ✅ آماده برای Production
+## 🆕 تغییرات اخیر (نوامبر 2024)
+
+### بهبودهای امنیتی:
+- ✅ Custom Exception Handling با mapping به HTTP codes
+- ✅ API Key Verification با SHA-256 و Timing Attack Protection
+- ✅ Advanced Rate Limiter با Sliding Window Algorithm
+- ✅ Multi-tier rate limiting (per-minute, per-hour, per-day)
+
+### بهبودهای عملکرد:
+- ✅ Multi-Layer Caching System (Memory + Redis + DB)
+- ✅ N+1 Query Optimization با eager loading
+- ✅ Transaction Management بهبود یافته
+- ✅ Real Streaming Responses
+
+### مانیتورینگ:
+- ✅ Prometheus Metrics جامع
+- ✅ Cache hit/miss tracking
+- ✅ Rate limit violation monitoring
+- ✅ LLM usage metrics
+
+---
+
+**نسخه**: 2.0.0  
+**آخرین بروزرسانی**: 8 نوامبر 2024  
+**وضعیت**: ✅ Production-Ready با بهبودهای امنیتی و عملکردی

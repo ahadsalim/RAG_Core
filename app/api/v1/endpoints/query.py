@@ -6,10 +6,14 @@ Main endpoints for RAG query processing
 from typing import Optional, Dict, Any
 from datetime import datetime
 import uuid
+import asyncio
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from sqlalchemy import select
 from pydantic import BaseModel, Field, validator
 import structlog
 
@@ -18,6 +22,19 @@ from app.rag.pipeline import RAGPipeline, RAGQuery
 from app.models.user import UserProfile, Conversation, Message as DBMessage, MessageRole
 from app.core.security import get_current_user_id
 from app.core.dependencies import get_redis_client
+from app.core.rate_limiter import TierBasedRateLimiter
+from app.core.exceptions import (
+    to_http_exception,
+    RateLimitException,
+    RecordNotFoundException,
+    AuthorizationException,
+    ValidationException
+)
+from app.core.metrics import (
+    record_query_metrics,
+    record_rate_limit_violation,
+    query_duration
+)
 from app.config.settings import settings
 
 logger = structlog.get_logger()
@@ -83,14 +100,22 @@ async def process_query(
     Process a user query through the RAG pipeline.
     
     This endpoint:
-    1. Validates user permissions
+    1. Validates user permissions and rate limits
     2. Processes the query through RAG
-    3. Saves conversation history
+    3. Saves conversation history (with transaction)
     4. Returns the response
+    5. Records metrics
     """
+    start_time = datetime.utcnow()
+    
     try:
-        # Get user profile
-        user = await db.get(UserProfile, user_id)
+        # Get user profile with eager loading to avoid N+1 queries
+        stmt = select(UserProfile).options(
+            selectinload(UserProfile.conversations)
+        ).where(UserProfile.id == user_id)
+        result = await db.execute(stmt)
+        user = result.scalar_one_or_none()
+        
         if not user:
             # Create user profile if doesn't exist
             user = UserProfile(
@@ -100,13 +125,35 @@ async def process_query(
                 created_at=datetime.utcnow()
             )
             db.add(user)
-            await db.commit()
+            await db.flush()  # Flush to get ID without committing
         
-        # Check user limits
+        # Check rate limits (sliding window)
+        redis = await get_redis_client()
+        rate_limiter = TierBasedRateLimiter(redis)
+        
+        try:
+            await rate_limiter.check_rate_limit_for_tier(
+                user_id=str(user.id),
+                tier=user.tier.value
+            )
+        except RateLimitException as e:
+            # Record rate limit violation
+            record_rate_limit_violation(
+                limit_type=e.limit_type if hasattr(e, 'limit_type') else 'unknown',
+                user_tier=user.tier.value
+            )
+            raise to_http_exception(e)
+        
+        # Check daily query limit (database-based)
         if not user.can_make_query():
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Daily query limit exceeded"
+            record_rate_limit_violation(
+                limit_type='daily',
+                user_tier=user.tier.value
+            )
+            raise RateLimitException(
+                message="Daily query limit exceeded",
+                retry_after=86400,
+                limit_type='daily'
             )
         
         # Get or create conversation
@@ -114,16 +161,15 @@ async def process_query(
         if request.conversation_id:
             conversation = await db.get(Conversation, request.conversation_id)
             if conversation and conversation.user_id != user.id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access denied to this conversation"
+                raise AuthorizationException(
+                    "Access denied to this conversation"
                 )
         
         if not conversation:
             conversation = Conversation(
                 id=uuid.uuid4(),
                 user_id=user.id,
-                title=request.query[:100],  # Use first 100 chars as title
+                title=request.query[:100],
                 created_at=datetime.utcnow()
             )
             db.add(conversation)
@@ -144,50 +190,63 @@ async def process_query(
         pipeline = RAGPipeline()
         rag_response = await pipeline.process(rag_query)
         
-        # Save user message
-        user_message = DBMessage(
-            id=uuid.uuid4(),
-            conversation_id=conversation.id,
-            role=MessageRole.USER,
-            content=request.query,
-            created_at=datetime.utcnow()
-        )
-        db.add(user_message)
+        # Use transaction for database operations
+        async with db.begin_nested():  # Savepoint for rollback
+            # Save user message
+            user_message = DBMessage(
+                id=uuid.uuid4(),
+                conversation_id=conversation.id,
+                role=MessageRole.USER,
+                content=request.query,
+                created_at=datetime.utcnow()
+            )
+            db.add(user_message)
+            
+            # Save assistant message
+            assistant_message = DBMessage(
+                id=uuid.uuid4(),
+                conversation_id=conversation.id,
+                role=MessageRole.ASSISTANT,
+                content=rag_response.answer,
+                tokens=rag_response.total_tokens,
+                processing_time_ms=rag_response.processing_time_ms,
+                retrieved_chunks=[
+                    {
+                        "text": chunk.text,
+                        "score": chunk.score,
+                        "source": chunk.source,
+                        "metadata": chunk.metadata
+                    }
+                    for chunk in rag_response.chunks
+                ],
+                sources=rag_response.sources,
+                model_used=rag_response.model_used,
+                created_at=datetime.utcnow()
+            )
+            db.add(assistant_message)
+            
+            # Update conversation
+            conversation.message_count += 2
+            conversation.total_tokens += rag_response.total_tokens
+            conversation.last_message_at = datetime.utcnow()
+            
+            # Update user statistics
+            user.increment_query_count()
+            user.total_tokens_used += rag_response.total_tokens
         
-        # Save assistant message
-        assistant_message = DBMessage(
-            id=uuid.uuid4(),
-            conversation_id=conversation.id,
-            role=MessageRole.ASSISTANT,
-            content=rag_response.answer,
-            tokens=rag_response.total_tokens,
-            processing_time_ms=rag_response.processing_time_ms,
-            retrieved_chunks=[
-                {
-                    "text": chunk.text,
-                    "score": chunk.score,
-                    "source": chunk.source,
-                    "metadata": chunk.metadata
-                }
-                for chunk in rag_response.chunks
-            ],
-            sources=rag_response.sources,
-            model_used=rag_response.model_used,
-            created_at=datetime.utcnow()
-        )
-        db.add(assistant_message)
-        
-        # Update conversation
-        conversation.message_count += 2
-        conversation.total_tokens += rag_response.total_tokens
-        conversation.last_message_at = datetime.utcnow()
-        
-        # Update user statistics
-        user.increment_query_count()
-        user.total_tokens_used += rag_response.total_tokens
-        
-        # Commit changes
+        # Commit all changes
         await db.commit()
+        
+        # Record metrics
+        duration = (datetime.utcnow() - start_time).total_seconds()
+        record_query_metrics(
+            status='success',
+            user_tier=user.tier.value,
+            language=request.language,
+            duration=duration,
+            tokens=rag_response.total_tokens,
+            model=rag_response.model_used
+        )
         
         # Background task: Update user daily limit reset
         background_tasks.add_task(reset_user_daily_limit_if_needed, user.id)
@@ -203,10 +262,25 @@ async def process_query(
             cached=rag_response.cached
         )
         
+    except (RateLimitException, AuthorizationException, ValidationException) as e:
+        # Convert custom exceptions to HTTP exceptions
+        raise to_http_exception(e)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Query processing failed: {e}", user_id=user_id)
+        logger.error(f"Query processing failed: {e}", user_id=user_id, exc_info=True)
+        
+        # Record error metrics
+        duration = (datetime.utcnow() - start_time).total_seconds()
+        record_query_metrics(
+            status='error',
+            user_tier='unknown',
+            language=request.language,
+            duration=duration,
+            tokens=0,
+            model='unknown'
+        )
+        
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Query processing failed"
@@ -232,44 +306,139 @@ async def process_query_stream(
         )
     
     async def generate():
-        """Generate streaming tokens."""
+        """Generate streaming tokens with real LLM streaming."""
         try:
-            # Similar setup as non-streaming endpoint
+            # Get user profile
             user = await db.get(UserProfile, user_id)
             if not user or not user.can_make_query():
-                yield '{"error": "Unauthorized or limit exceeded"}'
+                yield json.dumps({"error": "Unauthorized or limit exceeded"}) + "\n"
                 return
             
-            # Process query with streaming
-            # TODO: Implement streaming RAG pipeline
+            # Check rate limits
+            redis = await get_redis_client()
+            rate_limiter = TierBasedRateLimiter(redis)
+            
+            try:
+                await rate_limiter.check_rate_limit_for_tier(
+                    user_id=str(user.id),
+                    tier=user.tier.value
+                )
+            except RateLimitException:
+                yield json.dumps({"error": "Rate limit exceeded"}) + "\n"
+                return
+            
+            # Get or create conversation
+            conversation = None
+            if request.conversation_id:
+                conversation = await db.get(Conversation, request.conversation_id)
+            
+            if not conversation:
+                conversation = Conversation(
+                    id=uuid.uuid4(),
+                    user_id=user.id,
+                    title=request.query[:100],
+                    created_at=datetime.utcnow()
+                )
+                db.add(conversation)
+                await db.flush()
+            
+            # Send metadata first
+            yield json.dumps({
+                "type": "metadata",
+                "conversation_id": str(conversation.id),
+                "timestamp": datetime.utcnow().isoformat()
+            }) + "\n"
+            
+            # Process RAG pipeline for context retrieval
             pipeline = RAGPipeline()
             
-            # For now, return chunked response
-            rag_query = RAGQuery(
+            # Get embeddings and retrieve chunks (non-streaming part)
+            from app.rag.pipeline import RAGQuery as InternalRAGQuery
+            rag_query = InternalRAGQuery(
                 text=request.query,
                 user_id=str(user.id),
+                conversation_id=str(conversation.id),
                 language=request.language,
-                max_chunks=request.max_results
+                max_chunks=request.max_results,
+                filters=request.filters,
+                use_cache=False,  # Don't use cache for streaming
+                use_reranking=request.use_reranking
             )
             
-            response = await pipeline.process(rag_query)
+            # Get chunks (this part is not streamed)
+            enhanced_query = await pipeline._enhance_query(rag_query)
+            query_embedding = await pipeline._generate_embedding(enhanced_query)
+            chunks = await pipeline._retrieve_chunks(
+                query_embedding,
+                enhanced_query,
+                rag_query.filters,
+                limit=rag_query.max_chunks * 3
+            )
             
-            # Simulate streaming by chunking the response
-            import json
-            words = response.answer.split()
-            for i in range(0, len(words), 3):
-                chunk = " ".join(words[i:i+3])
-                token_data = StreamToken(token=chunk)
-                yield json.dumps(token_data.dict(), ensure_ascii=False) + "\n"
-                await asyncio.sleep(0.05)  # Simulate processing delay
+            if rag_query.use_reranking and len(chunks) > rag_query.max_chunks:
+                chunks = await pipeline._rerank_chunks(
+                    enhanced_query,
+                    chunks,
+                    top_k=rag_query.max_chunks
+                )
+            else:
+                chunks = chunks[:rag_query.max_chunks]
             
-            # Send finish token
-            finish_token = StreamToken(token="", finish_reason="stop")
-            yield json.dumps(finish_token.dict(), ensure_ascii=False) + "\n"
+            # Send sources
+            sources = pipeline._extract_sources(chunks)
+            yield json.dumps({
+                "type": "sources",
+                "sources": sources
+            }) + "\n"
+            
+            # Stream LLM response
+            full_answer = ""
+            async for token in pipeline._generate_answer_stream(
+                request.query,
+                chunks,
+                request.language,
+                str(conversation.id)
+            ):
+                full_answer += token
+                yield json.dumps({
+                    "type": "token",
+                    "content": token
+                }) + "\n"
+            
+            # Send finish signal
+            yield json.dumps({
+                "type": "finish",
+                "finish_reason": "stop"
+            }) + "\n"
+            
+            # Save messages to database (background)
+            user_message = DBMessage(
+                id=uuid.uuid4(),
+                conversation_id=conversation.id,
+                role=MessageRole.USER,
+                content=request.query,
+                created_at=datetime.utcnow()
+            )
+            db.add(user_message)
+            
+            assistant_message = DBMessage(
+                id=uuid.uuid4(),
+                conversation_id=conversation.id,
+                role=MessageRole.ASSISTANT,
+                content=full_answer,
+                sources=sources,
+                created_at=datetime.utcnow()
+            )
+            db.add(assistant_message)
+            
+            conversation.message_count += 2
+            user.increment_query_count()
+            
+            await db.commit()
             
         except Exception as e:
-            logger.error(f"Streaming failed: {e}")
-            yield f'{{"error": "{str(e)}"}}'
+            logger.error(f"Streaming failed: {e}", exc_info=True)
+            yield json.dumps({"type": "error", "error": str(e)}) + "\n"
     
     return StreamingResponse(
         generate(),

@@ -360,6 +360,61 @@ class RAGPipeline:
         
         return response.content, response.usage["total_tokens"]
     
+    async def _generate_answer_stream(
+        self,
+        query: str,
+        chunks: List[RAGChunk],
+        language: str,
+        conversation_id: Optional[str]
+    ):
+        """
+        Generate answer using LLM with streaming.
+        
+        Args:
+            query: User query
+            chunks: Retrieved chunks
+            language: Response language
+            conversation_id: Optional conversation ID for context
+            
+        Yields:
+            Tokens as they are generated
+        """
+        # Build context from chunks
+        context_parts = []
+        for i, chunk in enumerate(chunks, 1):
+            source_info = f"[منبع {i}]"
+            if chunk.metadata.get("document_title"):
+                source_info += f" {chunk.metadata['document_title']}"
+            if chunk.metadata.get("unit_number"):
+                source_info += f" - ماده {chunk.metadata['unit_number']}"
+            
+            context_parts.append(f"{source_info}:\n{chunk.text}")
+        
+        context = "\n\n".join(context_parts)
+        
+        # Build system prompt
+        system_prompt = self._build_system_prompt(language)
+        
+        # Build messages
+        messages = [
+            Message(role="system", content=system_prompt),
+            Message(
+                role="user",
+                content=f"""بر اساس اطلاعات زیر به سوال پاسخ دهید:
+
+اطلاعات مرجع:
+{context}
+
+سوال: {query}
+
+لطفاً پاسخی جامع و دقیق ارائه دهید و در صورت لزوم به منابع ارجاع دهید."""
+            )
+        ]
+        
+        # Stream response from LLM
+        async for token in self.llm.generate_stream(messages):
+            yield token
+    
     def _build_system_prompt(self, language: str) -> str:
         """Build system prompt based on language."""
         if language == "fa":

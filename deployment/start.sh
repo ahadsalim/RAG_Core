@@ -95,12 +95,10 @@ check_env_file() {
             # Ask for domain name (optional now, required for production)
             read -p "Enter domain name for Core (e.g., core.example.com) [leave empty for local dev]: " DOMAIN_INPUT
             if [ -n "$DOMAIN_INPUT" ]; then
-                # Always ensure exactly one DOMAIN_NAME line with correct value
-                if grep -q '^DOMAIN_NAME=' "$PROJECT_ROOT/.env"; then
-                    sed -i "s#^DOMAIN_NAME=.*#DOMAIN_NAME=\"$DOMAIN_INPUT\"#g" "$PROJECT_ROOT/.env"
-                else
-                    echo "DOMAIN_NAME=\"$DOMAIN_INPUT\"" >> "$PROJECT_ROOT/.env"
-                fi
+                # Remove all existing DOMAIN_NAME lines first to avoid duplicates
+                sed -i '/^DOMAIN_NAME=/d' "$PROJECT_ROOT/.env"
+                # Add the new DOMAIN_NAME at the end
+                echo "DOMAIN_NAME=\"$DOMAIN_INPUT\"" >> "$PROJECT_ROOT/.env"
                 print_success "DOMAIN_NAME set to $DOMAIN_INPUT"
             else
                 print_info "DOMAIN_NAME left empty (OK for development)."
@@ -231,6 +229,13 @@ if [[ $confirm =~ ^[Yy]$ ]]; then
         echo "CELERY_RESULT_BACKEND=\"redis://:$REDIS_PASSWORD@redis-core:6379/2\"" >> "$PROD_ENV_PATH"
     fi
 
+    # PostgreSQL environment variables for docker-compose
+    if grep -q '^POSTGRES_PASSWORD=' "$PROD_ENV_PATH"; then
+        sed -i "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=$DB_PASSWORD#g" "$PROD_ENV_PATH"
+    else
+        echo "POSTGRES_PASSWORD=$DB_PASSWORD" >> "$PROD_ENV_PATH"
+    fi
+    
     # Database URL password rotation (only for core_user in template form)
     if grep -q '^DATABASE_URL=' "$PROD_ENV_PATH"; then
         OLD_DB_URL=$(grep '^DATABASE_URL=' "$PROD_ENV_PATH" | sed 's/^DATABASE_URL=\"\(.*\)\"/\1/')

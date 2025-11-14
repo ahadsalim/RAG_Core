@@ -92,17 +92,24 @@ echo -e "${YELLOW}Setting up environment file...${NC}"
 if [ ! -f "$PROJECT_ROOT/.env" ]; then
     cp "$PROJECT_ROOT/deployment/config/.env.example" "$PROJECT_ROOT/.env"
     
-    # Generate secure passwords
-    SECRET_KEY=$(openssl rand -hex 32)
-    JWT_SECRET=$(openssl rand -hex 32)
-    DB_PASSWORD=$(openssl rand -hex 16)
-    REDIS_PASSWORD=$(openssl rand -hex 16)
+    # Generate secure passwords (hex for URL safety)
+    SECRET_KEY=$(openssl rand -base64 48 | tr -d '\n')
+    JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')
+    DB_PASSWORD=$(openssl rand -hex 24)
+    REDIS_PASSWORD=$(openssl rand -hex 24)
     
     # Update .env with secure values
     sed -i "s/your-secret-key-change-in-production/$SECRET_KEY/g" "$PROJECT_ROOT/.env"
     sed -i "s/your-jwt-secret-key-change-in-production/$JWT_SECRET/g" "$PROJECT_ROOT/.env"
     sed -i "s/core_pass/$DB_PASSWORD/g" "$PROJECT_ROOT/.env"
+    sed -i "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=$DB_PASSWORD#g" "$PROJECT_ROOT/.env"
     sed -i 's/REDIS_PASSWORD=""/REDIS_PASSWORD="'$REDIS_PASSWORD'"/g' "$PROJECT_ROOT/.env"
+    
+    # Update Redis URL with password
+    sed -i "s#redis://redis-core:6379#redis://:$REDIS_PASSWORD@redis-core:6379#g" "$PROJECT_ROOT/.env"
+    # Update Celery URLs with password
+    sed -i "s#CELERY_BROKER_URL=.*#CELERY_BROKER_URL=\"redis://:$REDIS_PASSWORD@redis-core:6379/1\"#g" "$PROJECT_ROOT/.env"
+    sed -i "s#CELERY_RESULT_BACKEND=.*#CELERY_RESULT_BACKEND=\"redis://:$REDIS_PASSWORD@redis-core:6379/2\"#g" "$PROJECT_ROOT/.env"
     
     # Set production environment
     sed -i 's/ENVIRONMENT="development"/ENVIRONMENT="production"/g' "$PROJECT_ROOT/.env"
@@ -110,10 +117,9 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
     sed -i 's/RELOAD=true/RELOAD=false/g' "$PROJECT_ROOT/.env"
     sed -i 's/LOG_LEVEL="INFO"/LOG_LEVEL="WARNING"/g' "$PROJECT_ROOT/.env"
     
-    # Add domain to .env
-    echo "" >> "$PROJECT_ROOT/.env"
-    echo "# Domain Configuration" >> "$PROJECT_ROOT/.env"
-    echo "DOMAIN_NAME=$DOMAIN_NAME" >> "$PROJECT_ROOT/.env"
+    # Add domain to .env (remove duplicates first)
+    sed -i '/^DOMAIN_NAME=/d' "$PROJECT_ROOT/.env"
+    echo "DOMAIN_NAME=\"$DOMAIN_NAME\"" >> "$PROJECT_ROOT/.env"
     
     echo -e "${GREEN}✓ Created .env with secure defaults${NC}"
     echo -e "${GREEN}✓ Generated secure passwords:${NC}"
@@ -355,7 +361,7 @@ echo "  - Database Password: ✓"
 echo "  - Redis Password: ✓"
 echo ""
 echo -e "${YELLOW}🔧 Nginx Proxy Manager Setup:${NC}"
-echo "  1. Access Admin UI: http://$(curl -s ifconfig.me):81"
+echo "  1. Access Admin UI: http://$(curl -s ifconfig.me 2>/dev/null || echo 'YOUR_SERVER_IP'):81"
 echo "     Default credentials:"
 echo "       Email: admin@example.com"
 echo "       Password: changeme"
@@ -368,6 +374,11 @@ echo "     - Scheme: http"
 echo "     - Forward Hostname/IP: core-api"
 echo "     - Forward Port: 7001"
 echo "     - Enable: Websockets Support"
+echo "     - Custom Nginx Config (Advanced tab):"
+echo "         proxy_set_header Host \$host;"
+echo "         proxy_set_header X-Real-IP \$remote_addr;"
+echo "         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;"
+echo "         proxy_set_header X-Forwarded-Proto \$scheme;"
 echo ""
 echo "  4. Request SSL Certificate:"
 echo "     - SSL tab → Request new certificate"

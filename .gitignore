@@ -1,0 +1,35 @@
+# Python
+/venv
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.backup
+.env.production
+
+# Data directories
+/data/
+/logs/
+/backups/
+
+# Docker
+/deployment/docker/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

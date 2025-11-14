@@ -1,0 +1,179 @@
+services:
+  # Core API Service
+  core-api:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
+    container_name: core-api
+    ports:
+      - "7001:7001"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT}
+      - DEBUG=${DEBUG}
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      - INGEST_DATABASE_URL=${INGEST_DATABASE_URL}
+      - QDRANT_HOST=${QDRANT_HOST}
+      - QDRANT_PORT=${QDRANT_PORT}
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+    depends_on:
+      - postgres-core
+      - redis-core
+      - qdrant
+    volumes:
+      - ../../:/app
+      - /app/data  # Exclude data directory to avoid permission issues
+    command: uvicorn app.main:app --host 0.0.0.0 --port 7001 --reload
+    networks:
+      - core-network
+      # Note: ingest database is external, no need for ingest-network
+
+  # PostgreSQL for Core
+  postgres-core:
+    image: postgres:15-alpine
+    container_name: postgres-core
+    environment:
+      - POSTGRES_DB=core_db
+      - POSTGRES_USER=core_user
+      - POSTGRES_PASSWORD=core_pass
+    volumes:
+      - postgres-core-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "7433:5432"  # Changed to 7000 series to avoid any conflicts
+    networks:
+      - core-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U core_user -d core_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Core
+  redis-core:
+    image: redis:7-alpine
+    container_name: redis-core
+    ports:
+      - "7379:6379"  # Changed to 7000 series to avoid any conflicts
+    volumes:
+      - redis-core-data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    networks:
+      - core-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "7333:6333"
+      - "7334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__LOG_LEVEL=INFO
+    networks:
+      - core-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
+    container_name: celery-worker
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT}
+      - DATABASE_URL=${DATABASE_URL}
+      - INGEST_DATABASE_URL=${INGEST_DATABASE_URL}
+      - QDRANT_HOST=${QDRANT_HOST}
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+    depends_on:
+      - redis-core
+      - postgres-core
+    volumes:
+      - ../../:/app
+    command: celery -A app.celery worker --loglevel=info
+    networks:
+      - core-network
+
+  # Celery Beat (Scheduler)
+  celery-beat:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
+    container_name: celery-beat
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT}
+      - DATABASE_URL=${DATABASE_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+    depends_on:
+      - redis-core
+      - postgres-core
+    volumes:
+      - ../../:/app
+    command: celery -A app.celery beat --loglevel=info
+    networks:
+      - core-network
+
+  # Flower (Celery Monitoring)
+  flower:
+    image: mher/flower:2.0.1
+    container_name: flower
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - FLOWER_PORT=5555
+    depends_on:
+      - redis-core
+    networks:
+      - core-network
+
+  # Nginx Proxy Manager
+  nginx-proxy-manager:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx-proxy-manager
+    restart: unless-stopped
+    ports:
+      - "80:80"     # HTTP
+      - "443:443"   # HTTPS
+      - "81:81"     # Admin UI
+    environment:
+      - DB_SQLITE_FILE=/data/database.sqlite
+    volumes:
+      - ../../data/nginx-proxy-manager/data:/data
+      - ../../data/nginx-proxy-manager/letsencrypt:/etc/letsencrypt
+    networks:
+      - core-network
+    healthcheck:
+      test: ["CMD", "/bin/check-health"]
+      interval: 10s
+      timeout: 3s
+
+volumes:
+  postgres-core-data:
+  redis-core-data:
+  qdrant-data:
+
+networks:
+  core-network:
+    driver: bridge
+  # ingest-network removed: ingest database is on external server

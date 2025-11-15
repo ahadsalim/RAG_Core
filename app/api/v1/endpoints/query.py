@@ -189,8 +189,22 @@ async def process_query(
         # Commit changes
         await db.commit()
         
-        # Background task: Update user daily limit reset
-        background_tasks.add_task(reset_user_daily_limit_if_needed, user.id)
+        # Background task: Send result to Users system (via Celery)
+        from app.tasks.notifications import send_query_result_to_users
+        send_query_result_to_users.delay(
+            user_id=str(user.id),
+            conversation_id=str(conversation.id),
+            message_id=str(assistant_message.id),
+            query=request.query,
+            answer=rag_response.answer,
+            sources=rag_response.sources,
+            tokens_used=rag_response.total_tokens,
+            processing_time_ms=rag_response.processing_time_ms
+        )
+        
+        # Background task: Update user statistics
+        from app.tasks.user import update_user_statistics
+        background_tasks.add_task(update_user_statistics.delay, str(user.id))
         
         # Return response
         return QueryResponse(

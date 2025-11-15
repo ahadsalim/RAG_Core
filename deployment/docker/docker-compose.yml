@@ -101,17 +101,23 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - INGEST_DATABASE_URL=${INGEST_DATABASE_URL}
       - QDRANT_HOST=${QDRANT_HOST}
+      - QDRANT_PORT=${QDRANT_PORT}
       - REDIS_URL=${REDIS_URL}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - CELERY_BROKER_URL=${CELERY_BROKER_URL}
       - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - USERS_API_URL=${USERS_API_URL}
+      - USERS_API_KEY=${USERS_API_KEY}
     depends_on:
       - redis-core
       - postgres-core
+      - qdrant
     volumes:
       - ../../:/app
-    command: celery -A app.celery worker --loglevel=info
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=4 --queues=sync,notifications,cleanup,user
     networks:
       - core-network
+    restart: unless-stopped
 
   # Celery Beat (Scheduler)
   celery-beat:
@@ -122,16 +128,23 @@ services:
     environment:
       - ENVIRONMENT=${ENVIRONMENT}
       - DATABASE_URL=${DATABASE_URL}
+      - INGEST_DATABASE_URL=${INGEST_DATABASE_URL}
+      - QDRANT_HOST=${QDRANT_HOST}
+      - QDRANT_PORT=${QDRANT_PORT}
+      - REDIS_URL=${REDIS_URL}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - CELERY_BROKER_URL=${CELERY_BROKER_URL}
       - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
     depends_on:
       - redis-core
       - postgres-core
+      - qdrant
     volumes:
       - ../../:/app
-    command: celery -A app.celery beat --loglevel=info
+    command: celery -A app.celery_app beat --loglevel=info
     networks:
       - core-network
+    restart: unless-stopped
 
   # Flower (Celery Monitoring)
   flower:

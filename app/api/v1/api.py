@@ -6,12 +6,13 @@ Main API router combining all endpoints
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    health,
     query,
     users,
-    sync,
     admin,
-    health,
-    embedding
+    sync,
+    embedding,
+    tasks
 )
 
 api_router = APIRouter()
@@ -51,4 +52,10 @@ api_router.include_router(
     embedding.router,
     prefix="",
     tags=["Embeddings"]
+)
+
+api_router.include_router(
+    tasks.router,
+    prefix="/tasks",
+    tags=["Task Management"]
 )

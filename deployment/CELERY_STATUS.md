@@ -2,155 +2,170 @@
 
 ## خلاصه
 
-**Celery در حال حاضر پیاده‌سازی نشده است** و سرویس‌های `celery-worker` و `celery-beat` در `docker-compose.yml` غیرفعال شده‌اند.
+✅ **Celery به طور کامل پیاده‌سازی شده است** و آماده استفاده در production.
 
-## چرا Celery غیرفعال شد؟
+## تغییرات انجام شده
 
-### مشکل اصلی
-زمانی که سیستم را راه‌اندازی کردیم، سرویس‌های Celery با خطای زیر مواجه شدند:
+### قبل (2025-11-14 قبل از ساعت 20:00)
+- ❌ Celery پیاده‌سازی نشده بود
+- ❌ Workers با خطا exit می‌کردند
+- ❌ هیچ task تعریف نشده بود
+
+### بعد (2025-11-15 ساعت 04:25)
+- ✅ Celery کامل پیاده‌سازی شد
+- ✅ 15+ task برای عملیات مختلف
+- ✅ Integration با endpoints موجود
+- ✅ Beat schedule برای taskهای دوره‌ای
+- ✅ Monitoring via Flower
+- ✅ Task management API
+
+## فایل‌های ایجاد شده
 
 ```
-Error: Unable to load celery application.
-The module app.celery was not found.
+app/
+├── celery_app.py                    # پیکربندی Celery
+├── tasks/
+│   ├── __init__.py
+│   ├── sync.py                      # 4 tasks
+│   ├── notifications.py             # 3 tasks
+│   ├── cleanup.py                   # 4 tasks
+│   └── user.py                      # 4 tasks
+└── api/v1/endpoints/
+    └── tasks.py                     # API برای مدیریت tasks
 ```
 
-### علت
-1. **ماژول Celery وجود ندارد**: فایل `app/celery.py` یا `app/celery/__init__.py` در پروژه وجود ندارد
-2. **تنظیمات Celery ناقص است**: در `app/config/settings.py` فقط متغیرهای محیطی Celery تعریف شده، اما خود Celery instance ایجاد نشده
-3. **Task‌ها تعریف نشده‌اند**: هیچ Celery task در پروژه پیاده‌سازی نشده
+## Tasks پیاده‌سازی شده
 
-### تصمیم
-برای جلوگیری از خطاهای مکرر و اجرای صحیح سایر سرویس‌ها، Celery workers را موقتاً غیرفعال کردیم:
+### Sync Tasks (4 tasks)
+1. `sync_embeddings_task` - همگام‌سازی embeddings
+2. `process_sync_queue` - پردازش صف (هر 5 دقیقه)
+3. `trigger_full_sync_task` - همگام‌سازی کامل
+4. `delete_document_embeddings_task` - حذف embeddings
 
-```bash
-docker-compose stop celery-worker celery-beat
-```
+### Notification Tasks (3 tasks)
+1. `send_query_result_to_users` - ارسال نتیجه به سیستم کاربران ⭐
+2. `send_usage_statistics` - ارسال آمار (هر ساعت)
+3. `send_system_notification` - اعلان‌های سیستمی
 
-## چه زمانی Celery نیاز است؟
+### Cleanup Tasks (4 tasks)
+1. `cleanup_old_cache` - پاکسازی cache (هر 6 ساعت)
+2. `cleanup_query_cache` - پاکسازی query cache (روزانه)
+3. `cleanup_old_conversations` - آرشیو مکالمات قدیمی
+4. `cleanup_failed_tasks` - پاکسازی taskهای failed
 
-Celery برای اجرای وظایف زمان‌بر و asynchronous استفاده می‌شود. در سیستم RAG Core، موارد زیر می‌توانند از Celery استفاده کنند:
+### User Tasks (4 tasks)
+1. `reset_user_daily_limit` - ریست محدودیت یک کاربر
+2. `reset_all_daily_limits` - ریست همه (نیمه‌شب)
+3. `update_user_statistics` - به‌روزرسانی آمار ⭐
+4. `calculate_user_tier` - محاسبه tier کاربر
 
-### کاربردهای پیشنهادی:
-1. **پردازش اسناد**: 
-   - استخراج متن از PDF/Word
-   - OCR برای تصاویر
-   - تبدیل فایل‌های صوتی به متن (Whisper)
+⭐ = استفاده خودکار بعد از هر query
 
-2. **Embedding و Indexing**:
-   - تولید embedding برای اسناد جدید
-   - به‌روزرسانی vector database
-   - Re-indexing اسناد
+## Integration با Endpoints
 
-3. **وظایف دوره‌ای**:
-   - پاکسازی cache قدیمی
-   - آرشیو لاگ‌ها
-   - گزارش‌گیری روزانه/هفتگی
-
-4. **ارسال اعلان‌ها**:
-   - ایمیل
-   - Webhook notifications
-   - پیامک
-
-## چگونه Celery را فعال کنیم؟
-
-### مرحله 1: ایجاد ماژول Celery
-
-ایجاد فایل `/srv/app/celery_app.py`:
-
+### `/api/v1/query/` (POST)
 ```python
-"""
-Celery Application Configuration
-"""
-from celery import Celery
-from app.config.settings import settings
-
-# Create Celery instance
-celery_app = Celery(
-    "core_tasks",
-    broker=str(settings.celery_broker_url),
-    backend=str(settings.celery_result_backend),
-)
-
-# Configure Celery
-celery_app.conf.update(
-    task_serializer=settings.celery_task_serializer,
-    result_serializer=settings.celery_result_serializer,
-    accept_content=settings.celery_accept_content,
-    timezone=settings.celery_timezone,
-    enable_utc=settings.celery_enable_utc,
-    task_track_started=True,
-    task_time_limit=30 * 60,  # 30 minutes
-    task_soft_time_limit=25 * 60,  # 25 minutes
-    worker_prefetch_multiplier=1,
-    worker_max_tasks_per_child=1000,
-)
-
-# Auto-discover tasks
-celery_app.autodiscover_tasks(['app.tasks'])
+# بعد از هر query موفق:
+send_query_result_to_users.delay(...)  # ارسال به سیستم کاربران
+update_user_statistics.delay(user_id)  # به‌روزرسانی آمار
 ```
 
-### مرحله 2: ایجاد Tasks
-
-ایجاد دایرکتوری و فایل `/srv/app/tasks/__init__.py`:
-
+### `/api/v1/sync/trigger-full-sync` (POST)
 ```python
-"""
-Celery Tasks
-"""
-from app.celery_app import celery_app
-
-@celery_app.task(name="tasks.example_task")
-def example_task(param: str) -> str:
-    """Example Celery task"""
-    return f"Processed: {param}"
-
-@celery_app.task(name="tasks.process_document")
-def process_document(document_id: int) -> dict:
-    """Process document asynchronously"""
-    # Implementation here
-    return {"status": "success", "document_id": document_id}
+# استفاده از Celery به جای background task
+task = trigger_full_sync_task.delay(batch_size=100)
+return {"task_id": task.id}
 ```
 
-### مرحله 3: به‌روزرسانی docker-compose command
+### `/api/v1/sync/document/{id}` (DELETE)
+```python
+# حذف async via Celery
+task = delete_document_embeddings_task.delay(document_id)
+return {"task_id": task.id}
+```
 
-در `/srv/deployment/docker/docker-compose.yml`:
+## API Endpoints جدید
+
+### `/api/v1/tasks/`
+
+- `GET /status/{task_id}` - وضعیت task
+- `GET /list` - لیست taskهای فعال
+- `POST /revoke/{task_id}` - لغو task
+- `GET /workers` - آمار workers
+- `POST /trigger/cleanup-cache` - اجرای دستی cleanup
+- `POST /trigger/reset-daily-limits` - اجرای دستی reset
+- `POST /trigger/send-statistics` - اجرای دستی ارسال آمار
+
+## Beat Schedule (Periodic Tasks)
+
+| Task | Schedule | Description |
+|------|----------|-------------|
+| `reset_all_daily_limits` | روزانه 00:00 | ریست محدودیت کاربران |
+| `cleanup_old_cache` | هر 6 ساعت | پاکسازی cache |
+| `cleanup_query_cache` | روزانه 02:00 | پاکسازی query cache |
+| `process_sync_queue` | هر 5 دقیقه | پردازش صف sync |
+| `send_usage_statistics` | هر ساعت | ارسال آمار به Users |
+
+## Docker Configuration
 
 ```yaml
 celery-worker:
-  command: celery -A app.celery_app worker --loglevel=info
+  command: celery -A app.celery_app worker --loglevel=info --concurrency=4 --queues=sync,notifications,cleanup,user
+  restart: unless-stopped
 
 celery-beat:
   command: celery -A app.celery_app beat --loglevel=info
+  restart: unless-stopped
+
+flower:
+  ports: ["5555:5555"]
+  # Access: http://localhost:5555
 ```
 
-### مرحله 4: راه‌اندازی مجدد
+## راه‌اندازی
 
 ```bash
-docker-compose -f /srv/deployment/docker/docker-compose.yml up -d celery-worker celery-beat
+# Start services
+cd /srv/deployment/docker
+docker-compose up -d celery-worker celery-beat flower
+
+# Check logs
+docker-compose logs -f celery-worker
+docker-compose logs -f celery-beat
+
+# Access Flower
+http://localhost:5555
 ```
 
-## وضعیت فعلی سرویس‌ها
+## تست
 
-✅ **فعال و سالم:**
-- `core-api`: API اصلی
-- `postgres-core`: دیتابیس
-- `redis-core`: Cache و message broker
-- `qdrant`: Vector database
-- `nginx-proxy-manager`: Reverse proxy با SSL
-- `flower`: Celery monitoring UI (در انتظار Celery)
+```bash
+# Test via API
+curl -X POST "http://localhost:7001/api/v1/tasks/trigger/cleanup-cache" \
+  -H "X-API-Key: your-api-key"
 
-🔴 **غیرفعال:**
-- `celery-worker`: نیاز به پیاده‌سازی
-- `celery-beat`: نیاز به پیاده‌سازی
+# Check task status
+curl "http://localhost:7001/api/v1/tasks/status/{task_id}" \
+  -H "X-API-Key: your-api-key"
+
+# List workers
+curl "http://localhost:7001/api/v1/tasks/workers" \
+  -H "X-API-Key: your-api-key"
+```
+
+## مستندات
+
+مستندات کامل در:
+- `/srv/document/CELERY_IMPLEMENTATION.md` - راهنمای کامل پیاده‌سازی
+- `/srv/deployment/README.md` - راهنمای deployment
 
 ## نتیجه‌گیری
 
-Celery یک قابلیت اختیاری است که در آینده می‌تواند برای بهبود performance و مدیریت وظایف زمان‌بر اضافه شود. در حال حاضر، سیستم بدون Celery به طور کامل کار می‌کند و تمام APIها قابل استفاده هستند.
+✅ Celery به طور کامل پیاده‌سازی و آماده استفاده است
+✅ ارسال خودکار نتایج query به سیستم کاربران
+✅ پاکسازی خودکار سیستم
+✅ همگام‌سازی بهینه با Ingest
+✅ مانیتورینگ کامل via Flower
+✅ API برای مدیریت tasks
 
-اگر نیاز به اجرای وظایف asynchronous دارید، می‌توانید از مراحل بالا برای فعال‌سازی Celery استفاده کنید.
-
-## منابع
-
-- [Celery Documentation](https://docs.celeryq.dev/)
-- [FastAPI with Celery](https://fastapi.tiangolo.com/tutorial/background-tasks/)
-- [Flower Monitoring](https://flower.readthedocs.io/)
+**سیستم حالا production-ready است! 🎉**

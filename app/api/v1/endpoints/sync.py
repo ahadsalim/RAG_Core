@@ -120,14 +120,17 @@ async def trigger_full_sync(
     Trigger a full synchronization from Ingest pgvector to Qdrant.
     
     This is a heavy operation and should be run carefully.
+    Uses Celery for async processing.
     """
     try:
-        # Run sync in background
-        background_tasks.add_task(run_full_sync)
+        # Run sync via Celery
+        from app.tasks.sync import trigger_full_sync_task
+        task = trigger_full_sync_task.delay(batch_size=100)
         
         return {
             "status": "initiated",
-            "message": "Full sync started in background"
+            "message": "Full sync started in background",
+            "task_id": task.id
         }
         
     except Exception as e:
@@ -201,17 +204,17 @@ async def delete_document_embeddings(
     document_id: str,
     api_key: str = Depends(verify_sync_api_key)
 ):
-    """Delete all embeddings for a specific document."""
+    """Delete all embeddings for a specific document (async via Celery)."""
     try:
-        sync_service = SyncService()
-        deleted = await sync_service.qdrant_service.delete_by_document_id(
-            document_id
-        )
+        # Run delete via Celery for better reliability
+        from app.tasks.sync import delete_document_embeddings_task
+        task = delete_document_embeddings_task.delay(document_id)
         
         return {
-            "status": "success",
+            "status": "initiated",
+            "message": "Document deletion started",
             "document_id": document_id,
-            "deleted": deleted
+            "task_id": task.id
         }
         
     except Exception as e:

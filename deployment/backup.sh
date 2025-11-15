@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Core System - Backup Script
-# اسکریپت پشتیبان‌گیری از سیستم Core
+# Core RAG System - Unified Backup & Restore Script
+# اسکریپت یکپارچه Backup و Restore
 
 set -e
 
@@ -11,161 +11,229 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_NAME="core_backup_${TIMESTAMP}"
 RETENTION_DAYS=30
 
-# Colors for output
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo "========================================="
-echo "Core System - Backup"
-echo "Timestamp: ${TIMESTAMP}"
-echo "========================================="
+print_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
+print_success() { echo -e "${GREEN}✅ $1${NC}"; }
+print_error() { echo -e "${RED}❌ $1${NC}"; }
+print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 
-# Check if running from correct directory
-if [ ! -f "deployment/backup.sh" ]; then
-    echo -e "${RED}Error: Please run this script from the core project root directory${NC}"
-    exit 1
-fi
+# Detect directories
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-# Create backup directory if not exists
-mkdir -p "${BACKUP_DIR}"
-mkdir -p "${BACKUP_DIR}/${BACKUP_NAME}"
-
-# Function to check if service is running
-check_service() {
-    docker-compose -f deployment/docker/docker-compose.yml ps | grep -q "$1.*Up"
+show_usage() {
+    echo "Usage: $0 [COMMAND]"
+    echo ""
+    echo "Commands:"
+    echo "  backup              Create full backup"
+    echo "  restore [FILE]      Restore from backup file"
+    echo "  list                List available backups"
+    echo "  clean               Remove old backups (older than $RETENTION_DAYS days)"
+    echo ""
+    echo "Examples:"
+    echo "  $0 backup"
+    echo "  $0 restore /var/lib/core/backups/core_backup_20251115_093000.tar.gz"
+    echo "  $0 list"
 }
 
-echo -e "${YELLOW}Starting backup process...${NC}"
-
-# 1. Backup PostgreSQL Database
-echo -e "${YELLOW}Backing up PostgreSQL database...${NC}"
-if check_service "postgres-core"; then
-    docker-compose -f deployment/docker/docker-compose.yml exec -T postgres-core \
-        pg_dump -U core_user -d core_db > "${BACKUP_DIR}/${BACKUP_NAME}/postgres_dump.sql"
+create_backup() {
+    print_info "Starting backup process..."
     
-    # Compress the dump
-    gzip "${BACKUP_DIR}/${BACKUP_NAME}/postgres_dump.sql"
-    echo -e "${GREEN}✓ PostgreSQL backup completed${NC}"
-else
-    echo -e "${RED}✗ PostgreSQL is not running. Skipping database backup.${NC}"
-fi
-
-# 2. Backup Redis Data
-echo -e "${YELLOW}Backing up Redis data...${NC}"
-if check_service "redis-core"; then
-    docker-compose -f deployment/docker/docker-compose.yml exec -T redis-core \
-        redis-cli --rdb /data/dump.rdb BGSAVE
+    # Create backup directory
+    mkdir -p "$BACKUP_DIR"
     
-    # Wait for background save to complete
-    sleep 5
+    BACKUP_PATH="$BACKUP_DIR/${BACKUP_NAME}.tar.gz"
+    TEMP_DIR="/tmp/core_backup_${TIMESTAMP}"
     
-    # Copy Redis dump file
-    docker cp redis-core:/data/dump.rdb "${BACKUP_DIR}/${BACKUP_NAME}/redis_dump.rdb"
-    echo -e "${GREEN}✓ Redis backup completed${NC}"
-else
-    echo -e "${RED}✗ Redis is not running. Skipping Redis backup.${NC}"
-fi
-
-# 3. Backup Qdrant Data
-echo -e "${YELLOW}Backing up Qdrant vector database...${NC}"
-if check_service "qdrant"; then
-    # Create Qdrant snapshot via API
-    COLLECTION_NAME=$(grep QDRANT_COLLECTION .env | cut -d '=' -f2 | tr -d '"')
+    mkdir -p "$TEMP_DIR"
     
-    # Trigger snapshot creation
-    curl -X POST "http://localhost:7333/collections/${COLLECTION_NAME}/snapshots" \
-        -H "Content-Type: application/json" \
-        -d '{}' > /dev/null 2>&1
+    # Backup database
+    print_info "Backing up PostgreSQL database..."
+    docker-compose -f "$SCRIPT_DIR/docker/docker-compose.yml" exec -T postgres-core \
+        pg_dump -U core_user core_db > "$TEMP_DIR/database.sql"
     
-    # Wait for snapshot to be created
-    sleep 10
+    # Backup .env file
+    print_info "Backing up configuration..."
+    cp "$PROJECT_ROOT/.env" "$TEMP_DIR/.env"
     
-    # Get snapshot list
-    SNAPSHOT_NAME=$(curl -s "http://localhost:7333/collections/${COLLECTION_NAME}/snapshots" | \
-        python3 -c "import sys, json; snapshots = json.load(sys.stdin)['result']; print(snapshots[-1]['name'] if snapshots else '')")
+    # Backup Qdrant data
+    print_info "Backing up Qdrant data..."
+    docker-compose -f "$SCRIPT_DIR/docker/docker-compose.yml" exec -T qdrant \
+        tar czf - /qdrant/storage > "$TEMP_DIR/qdrant_data.tar.gz" 2>/dev/null || \
+        print_warning "Qdrant backup skipped"
     
-    if [ ! -z "$SNAPSHOT_NAME" ]; then
-        # Download snapshot
-        curl -o "${BACKUP_DIR}/${BACKUP_NAME}/qdrant_snapshot.tar" \
-            "http://localhost:7333/collections/${COLLECTION_NAME}/snapshots/${SNAPSHOT_NAME}"
-        echo -e "${GREEN}✓ Qdrant backup completed${NC}"
-    else
-        echo -e "${YELLOW}⚠ Could not create Qdrant snapshot${NC}"
-    fi
-else
-    echo -e "${RED}✗ Qdrant is not running. Skipping Qdrant backup.${NC}"
-fi
-
-# 4. Backup configuration files
-echo -e "${YELLOW}Backing up configuration files...${NC}"
-cp .env "${BACKUP_DIR}/${BACKUP_NAME}/env_backup" 2>/dev/null || true
-cp .env.production "${BACKUP_DIR}/${BACKUP_NAME}/env_production_backup" 2>/dev/null || true
-
-# Backup Nginx config if exists
-if [ -f "/etc/nginx/sites-available/core-api" ]; then
-    cp /etc/nginx/sites-available/core-api "${BACKUP_DIR}/${BACKUP_NAME}/nginx_config"
-fi
-
-echo -e "${GREEN}✓ Configuration backup completed${NC}"
-
-# 5. Backup uploaded files and logs (if any)
-echo -e "${YELLOW}Backing up logs...${NC}"
-if [ -d "logs" ]; then
-    tar -czf "${BACKUP_DIR}/${BACKUP_NAME}/logs.tar.gz" logs/
-    echo -e "${GREEN}✓ Logs backup completed${NC}"
-fi
-
-# 6. Create metadata file
-echo -e "${YELLOW}Creating backup metadata...${NC}"
-cat > "${BACKUP_DIR}/${BACKUP_NAME}/metadata.json" <<EOF
-{
-    "timestamp": "${TIMESTAMP}",
-    "date": "$(date)",
-    "hostname": "$(hostname)",
-    "docker_version": "$(docker --version)",
-    "services": {
-        "postgres": $(check_service "postgres-core" && echo "true" || echo "false"),
-        "redis": $(check_service "redis-core" && echo "true" || echo "false"),
-        "qdrant": $(check_service "qdrant" && echo "true" || echo "false"),
-        "core_api": $(check_service "core-api" && echo "true" || echo "false")
-    }
-}
+    # Create backup metadata
+    cat > "$TEMP_DIR/backup_info.txt" <<EOF
+Backup Date: $(date)
+Timestamp: $TIMESTAMP
+Project Root: $PROJECT_ROOT
+Database: core_db
+User: core_user
 EOF
+    
+    # Create compressed archive
+    print_info "Creating compressed archive..."
+    tar czf "$BACKUP_PATH" -C "$TEMP_DIR" .
+    
+    # Cleanup temp directory
+    rm -rf "$TEMP_DIR"
+    
+    # Set permissions
+    chmod 600 "$BACKUP_PATH"
+    
+    print_success "Backup completed: $BACKUP_PATH"
+    print_info "Backup size: $(du -h "$BACKUP_PATH" | cut -f1)"
+}
 
-# 7. Create final archive
-echo -e "${YELLOW}Creating final backup archive...${NC}"
-cd "${BACKUP_DIR}"
-tar -czf "${BACKUP_NAME}.tar.gz" "${BACKUP_NAME}/"
-rm -rf "${BACKUP_NAME}"
-cd - > /dev/null
+restore_backup() {
+    BACKUP_FILE="$1"
+    
+    if [ -z "$BACKUP_FILE" ]; then
+        print_error "Please specify backup file"
+        echo "Available backups:"
+        list_backups
+        exit 1
+    fi
+    
+    if [ ! -f "$BACKUP_FILE" ]; then
+        print_error "Backup file not found: $BACKUP_FILE"
+        exit 1
+    fi
+    
+    print_warning "⚠️  This will restore from backup and overwrite current data!"
+    read -p "Are you sure? (yes/no): " CONFIRM
+    
+    if [ "$CONFIRM" != "yes" ]; then
+        print_info "Restore cancelled"
+        exit 0
+    fi
+    
+    print_info "Starting restore process..."
+    
+    TEMP_DIR="/tmp/core_restore_$(date +%s)"
+    mkdir -p "$TEMP_DIR"
+    
+    # Extract backup
+    print_info "Extracting backup..."
+    tar xzf "$BACKUP_FILE" -C "$TEMP_DIR"
+    
+    # Stop services
+    print_info "Stopping services..."
+    docker-compose -f "$SCRIPT_DIR/docker/docker-compose.yml" stop
+    
+    # Restore database
+    if [ -f "$TEMP_DIR/database.sql" ]; then
+        print_info "Restoring database..."
+        docker-compose -f "$SCRIPT_DIR/docker/docker-compose.yml" up -d postgres-core
+        sleep 5
+        
+        # Drop and recreate database
+        docker-compose -f "$SCRIPT_DIR/docker/docker-compose.yml" exec -T postgres-core \
+            psql -U core_user -d postgres -c "DROP DATABASE IF EXISTS core_db;"
+        docker-compose -f "$SCRIPT_DIR/docker/docker-compose.yml" exec -T postgres-core \
+            psql -U core_user -d postgres -c "CREATE DATABASE core_db;"
+        
+        # Restore data
+        docker-compose -f "$SCRIPT_DIR/docker/docker-compose.yml" exec -T postgres-core \
+            psql -U core_user -d core_db < "$TEMP_DIR/database.sql"
+        
+        print_success "Database restored"
+    fi
+    
+    # Restore .env
+    if [ -f "$TEMP_DIR/.env" ]; then
+        print_info "Restoring configuration..."
+        cp "$TEMP_DIR/.env" "$PROJECT_ROOT/.env"
+        print_success "Configuration restored"
+    fi
+    
+    # Restore Qdrant data
+    if [ -f "$TEMP_DIR/qdrant_data.tar.gz" ]; then
+        print_info "Restoring Qdrant data..."
+        docker-compose -f "$SCRIPT_DIR/docker/docker-compose.yml" up -d qdrant
+        sleep 5
+        docker-compose -f "$SCRIPT_DIR/docker/docker-compose.yml" exec -T qdrant \
+            tar xzf - -C / < "$TEMP_DIR/qdrant_data.tar.gz" 2>/dev/null || \
+            print_warning "Qdrant restore skipped"
+    fi
+    
+    # Cleanup temp directory
+    rm -rf "$TEMP_DIR"
+    
+    # Restart all services
+    print_info "Restarting all services..."
+    docker-compose -f "$SCRIPT_DIR/docker/docker-compose.yml" up -d
+    
+    print_success "Restore completed successfully!"
+}
 
-BACKUP_SIZE=$(du -sh "${BACKUP_DIR}/${BACKUP_NAME}.tar.gz" | cut -f1)
-echo -e "${GREEN}✓ Backup archive created: ${BACKUP_NAME}.tar.gz (${BACKUP_SIZE})${NC}"
+list_backups() {
+    if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A $BACKUP_DIR 2>/dev/null)" ]; then
+        print_warning "No backups found in $BACKUP_DIR"
+        return
+    fi
+    
+    echo ""
+    echo "Available backups:"
+    echo "=================="
+    
+    for backup in "$BACKUP_DIR"/*.tar.gz; do
+        if [ -f "$backup" ]; then
+            SIZE=$(du -h "$backup" | cut -f1)
+            DATE=$(stat -c %y "$backup" | cut -d'.' -f1)
+            echo "📦 $(basename "$backup")"
+            echo "   Size: $SIZE"
+            echo "   Date: $DATE"
+            echo "   Path: $backup"
+            echo ""
+        fi
+    done
+}
 
-# 8. Upload to remote storage (optional)
-if [ ! -z "$BACKUP_S3_BUCKET" ]; then
-    echo -e "${YELLOW}Uploading to S3...${NC}"
-    aws s3 cp "${BACKUP_DIR}/${BACKUP_NAME}.tar.gz" \
-        "s3://${BACKUP_S3_BUCKET}/core-backups/${BACKUP_NAME}.tar.gz"
-    echo -e "${GREEN}✓ Backup uploaded to S3${NC}"
-fi
+clean_old_backups() {
+    print_info "Cleaning old backups (older than $RETENTION_DAYS days)..."
+    
+    if [ ! -d "$BACKUP_DIR" ]; then
+        print_warning "Backup directory not found"
+        return
+    fi
+    
+    DELETED=0
+    find "$BACKUP_DIR" -name "core_backup_*.tar.gz" -type f -mtime +$RETENTION_DAYS -print0 | while IFS= read -r -d '' backup; do
+        print_info "Deleting: $(basename "$backup")"
+        rm -f "$backup"
+        DELETED=$((DELETED + 1))
+    done
+    
+    if [ $DELETED -eq 0 ]; then
+        print_info "No old backups to delete"
+    else
+        print_success "Deleted $DELETED old backup(s)"
+    fi
+}
 
-# 9. Clean old backups
-echo -e "${YELLOW}Cleaning old backups (older than ${RETENTION_DAYS} days)...${NC}"
-find "${BACKUP_DIR}" -name "core_backup_*.tar.gz" -type f -mtime +${RETENTION_DAYS} -delete
-echo -e "${GREEN}✓ Old backups cleaned${NC}"
-
-# 10. Send notification (optional)
-if [ ! -z "$BACKUP_NOTIFICATION_WEBHOOK" ]; then
-    curl -X POST "$BACKUP_NOTIFICATION_WEBHOOK" \
-        -H "Content-Type: application/json" \
-        -d "{\"text\":\"Core backup completed successfully: ${BACKUP_NAME}.tar.gz (${BACKUP_SIZE})\"}" \
-        > /dev/null 2>&1
-fi
-
-echo -e "${GREEN}=========================================${NC}"
-echo -e "${GREEN}Backup completed successfully!${NC}"
-echo -e "${GREEN}Location: ${BACKUP_DIR}/${BACKUP_NAME}.tar.gz${NC}"
-echo -e "${GREEN}=========================================${NC}"
+# Main
+case "${1:-}" in
+    backup)
+        create_backup
+        ;;
+    restore)
+        restore_backup "$2"
+        ;;
+    list)
+        list_backups
+        ;;
+    clean)
+        clean_old_backups
+        ;;
+    *)
+        show_usage
+        exit 1
+        ;;
+esac

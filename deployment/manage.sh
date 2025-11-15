@@ -40,19 +40,19 @@ show_menu() {
     echo -e "${BLUE}   Core RAG System - Management${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
-    echo "1) بررسی و اعتبارسنجی .env"
-    echo "2) مدیریت API Keys"
-    echo "3) تغییر رمزهای عبور (Rotate Secrets)"
-    echo "4) خروج"
+    echo "1) Validate .env configuration"
+    echo "2) Manage API Keys"
+    echo "3) Rotate Secrets"
+    echo "4) Exit"
     echo ""
-    read -p "انتخاب شما (1-4): " choice
+    read -p "Your choice (1-4): " choice
     
     case "$choice" in
         1) validate_env ;;
         2) manage_apikeys ;;
         3) rotate_secrets ;;
         4) exit 0 ;;
-        *) print_error "انتخاب نامعتبر" && show_menu ;;
+        *) print_error "Invalid choice" && show_menu ;;
     esac
 }
 
@@ -62,7 +62,7 @@ show_menu() {
 validate_env() {
     echo ""
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}اعتبارسنجی فایل .env${NC}"
+    echo -e "${BLUE}Validating .env Configuration${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     
@@ -76,7 +76,6 @@ validate_env() {
     
     # Required variables
     REQUIRED_VARS=(
-        "SECRET_KEY"
         "JWT_SECRET_KEY"
         "DATABASE_URL"
         "POSTGRES_DB"
@@ -89,7 +88,7 @@ validate_env() {
         "CELERY_RESULT_BACKEND"
     )
     
-    print_info "بررسی متغیرهای ضروری..."
+    print_info "Checking required variables..."
     MISSING_VARS=()
     for var in "${REQUIRED_VARS[@]}"; do
         if ! grep -q "^${var}=" "$ENV_FILE"; then
@@ -107,7 +106,7 @@ validate_env() {
     fi
     
     echo ""
-    print_info "بررسی Docker service names..."
+    print_info "Checking Docker service names..."
     
     ISSUES=()
     
@@ -140,15 +139,7 @@ validate_env() {
     
     # Check passwords
     echo ""
-    print_info "بررسی امنیت رمزها..."
-    
-    SECRET_KEY=$(get_env SECRET_KEY)
-    if [ "$SECRET_KEY" = "your-secret-key-change-in-production" ]; then
-        print_error "SECRET_KEY is default value!"
-        ISSUES+=("SECRET_KEY")
-    else
-        print_success "SECRET_KEY is secure"
-    fi
+    print_info "Checking password security..."
     
     POSTGRES_PASS=$(get_env POSTGRES_PASSWORD)
     if [ "$POSTGRES_PASS" = "core_pass" ]; then
@@ -182,16 +173,16 @@ validate_env() {
 manage_apikeys() {
     echo ""
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}مدیریت API Keys${NC}"
+    echo -e "${BLUE}API Keys Management${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
-    echo "1) نمایش INGEST_API_KEY"
-    echo "2) تولید INGEST_API_KEY جدید"
-    echo "3) نمایش USERS_API_KEY"
-    echo "4) تولید USERS_API_KEY جدید"
-    echo "5) بازگشت"
+    echo "1) Show INGEST_API_KEY"
+    echo "2) Generate new INGEST_API_KEY"
+    echo "3) Show USERS_API_KEY"
+    echo "4) Generate new USERS_API_KEY"
+    echo "5) Back to main menu"
     echo ""
-    read -p "انتخاب شما (1-5): " choice
+    read -p "Your choice (1-5): " choice
     
     case "$choice" in
         1)
@@ -262,7 +253,7 @@ manage_apikeys() {
 rotate_secrets() {
     echo ""
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}تغییر رمزهای عبور${NC}"
+    echo -e "${BLUE}Rotate Secrets${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     
@@ -282,15 +273,12 @@ rotate_secrets() {
     print_success "Backup created: .env.backup-$TIMESTAMP"
     
     # Generate new secrets
-    NEW_SECRET=$(openssl rand -base64 48 | tr -d '\n')
     NEW_JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')
     NEW_REDIS_PASSWORD=$(openssl rand -base64 24 | tr -d '\n')
     
-    set_env SECRET_KEY "$NEW_SECRET"
     set_env JWT_SECRET_KEY "$NEW_JWT_SECRET"
     set_env REDIS_PASSWORD "$NEW_REDIS_PASSWORD"
     
-    print_success "SECRET_KEY rotated"
     print_success "JWT_SECRET_KEY rotated"
     print_success "REDIS_PASSWORD rotated"
     

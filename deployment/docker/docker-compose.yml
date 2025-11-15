@@ -10,7 +10,6 @@ services:
     environment:
       - ENVIRONMENT=${ENVIRONMENT}
       - DEBUG=${DEBUG}
-      - SECRET_KEY=${SECRET_KEY}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - DATABASE_URL=${DATABASE_URL}
       - INGEST_DATABASE_URL=${INGEST_DATABASE_URL}

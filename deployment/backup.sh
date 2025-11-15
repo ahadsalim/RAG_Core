@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # Core RAG System - Unified Backup & Restore Script
-# اسکریپت یکپارچه Backup و Restore
 
 set -e
 
@@ -106,7 +105,7 @@ restore_backup() {
         exit 1
     fi
     
-    print_warning "⚠️  This will restore from backup and overwrite current data!"
+    print_warning "WARNING: This will restore from backup and overwrite current data!"
     read -p "Are you sure? (yes/no): " CONFIRM
     
     if [ "$CONFIRM" != "yes" ]; then
@@ -187,10 +186,10 @@ list_backups() {
         if [ -f "$backup" ]; then
             SIZE=$(du -h "$backup" | cut -f1)
             DATE=$(stat -c %y "$backup" | cut -d'.' -f1)
-            echo "📦 $(basename "$backup")"
-            echo "   Size: $SIZE"
-            echo "   Date: $DATE"
-            echo "   Path: $backup"
+            echo "[*] $(basename "$backup")"
+            echo "    Size: $SIZE"
+            echo "    Date: $DATE"
+            echo "    Path: $backup"
             echo ""
         fi
     done

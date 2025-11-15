@@ -38,7 +38,6 @@ class Settings(BaseSettings):
     domain_name: Optional[str] = Field(default=None, description="Production domain name")
     
     # Security
-    secret_key: str = Field(min_length=32)
     jwt_secret_key: str = Field(min_length=32)
     jwt_algorithm: str = Field(default="HS256")
     access_token_expire_minutes: int = Field(default=30)

@@ -63,13 +63,11 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
     cp "$SCRIPT_DIR/config/.env.example" "$PROJECT_ROOT/.env"
     
     # Generate secure passwords
-    SECRET_KEY=$(openssl rand -base64 48 | tr -d '\n')
     JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')
     DB_PASSWORD=$(openssl rand -hex 24)
     REDIS_PASSWORD=$(openssl rand -hex 24)
     
     # Update .env with secure values
-    sed -i "s/your-secret-key-change-in-production/$SECRET_KEY/g" "$PROJECT_ROOT/.env"
     sed -i "s/your-jwt-secret-key-change-in-production/$JWT_SECRET/g" "$PROJECT_ROOT/.env"
     sed -i "s/core_pass/$DB_PASSWORD/g" "$PROJECT_ROOT/.env"
     sed -i "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=$DB_PASSWORD#g" "$PROJECT_ROOT/.env"

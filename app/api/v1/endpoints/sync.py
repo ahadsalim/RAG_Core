@@ -26,17 +26,31 @@ router = APIRouter()
 # Request/Response Models
 class EmbeddingData(BaseModel):
     """Embedding data model."""
-    id: str
-    vector: list[float]
-    text: str
-    document_id: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    id: str = Field(..., description="Unique embedding ID", examples=["953652110735163"])
+    vector: list[float] = Field(..., description="Embedding vector (768 dimensions for multilingual-e5-base)", examples=[[0.1, 0.2, 0.3]])
+    text: str = Field(..., description="Original text content", examples=["ماده ۱۷۹ - شکار کردن موجب تملک است."])
+    document_id: str = Field(..., description="Source document ID", examples=["dee1acff-8131-49ec-b7ed-78d543dcc539"])
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional metadata (language, jurisdiction, etc.)",
+        examples=[{"language": "fa", "jurisdiction": "جمهوری اسلامی ایران"}]
+    )
 
 
 class SyncEmbeddingsRequest(BaseModel):
     """Sync embeddings request."""
-    embeddings: list[EmbeddingData]
-    sync_type: str = Field(default="incremental")  # incremental, full
+    embeddings: list[EmbeddingData] = Field(
+        ...,
+        description="List of embeddings to sync",
+        min_items=1,
+        max_items=1000
+    )
+    sync_type: str = Field(
+        default="incremental",
+        description="Sync type: 'incremental' for updates, 'full' for complete replacement",
+        pattern="^(incremental|full)$",
+        examples=["incremental"]
+    )
 
 
 class SyncStatusResponse(BaseModel):
@@ -60,17 +74,71 @@ async def verify_sync_api_key(x_api_key: str = Header(..., alias="X-API-Key")) -
 
 
 # Sync embeddings endpoint
-@router.post("/embeddings", response_model=None)
+@router.post(
+    "/embeddings",
+    response_model=None,
+    summary="Sync Embeddings from Ingest",
+    description="""
+    Receive and store embeddings from Ingest system into Qdrant vector database.
+    
+    **Authentication:** Requires X-API-Key header with INGEST_API_KEY.
+    
+    **Use Case:** Called by Ingest system when:
+    - New documents are processed and embedded
+    - Existing documents are updated
+    - Batch sync operations are performed
+    
+    **Process:**
+    1. Validates API key
+    2. Receives embeddings with metadata
+    3. Stores in Qdrant vector database (upsert operation)
+    4. Returns sync statistics
+    
+    **Example Request:**
+    ```bash
+    curl -X POST https://core.domain.com/api/v1/sync/embeddings \
+      -H "X-API-Key: your-ingest-api-key" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "embeddings": [
+          {
+            "id": "953652110735163",
+            "vector": [0.1, 0.2, ...],
+            "text": "ماده ۱۷۹ - شکار کردن موجب تملک است.",
+            "document_id": "dee1acff-8131-49ec-b7ed-78d543dcc539",
+            "metadata": {
+              "language": "fa",
+              "jurisdiction": "جمهوری اسلامی ایران"
+            }
+          }
+        ],
+        "sync_type": "incremental"
+      }'
+    ```
+    """,
+    responses={
+        200: {
+            "description": "Embeddings synced successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "success",
+                        "synced_count": 1,
+                        "timestamp": "2025-11-17T06:00:00Z"
+                    }
+                }
+            }
+        },
+        401: {"description": "Invalid or missing API key"},
+        500: {"description": "Sync operation failed"}
+    }
+)
 async def sync_embeddings(
     request: SyncEmbeddingsRequest,
     background_tasks: BackgroundTasks,
     api_key: str = Depends(verify_sync_api_key)
 ):
-    """
-    Receive embeddings from Ingest system for syncing to Qdrant.
-    
-    This endpoint is called by the Ingest system to push embeddings.
-    """
+    """Receive embeddings from Ingest system for syncing to Qdrant."""
     try:
         sync_service = SyncService()
         

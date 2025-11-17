@@ -27,14 +27,51 @@ router = APIRouter()
 # Request/Response Models
 class QueryRequest(BaseModel):
     """Query request model."""
-    query: str = Field(..., min_length=1, max_length=settings.max_query_length)
-    conversation_id: Optional[str] = None
-    language: str = Field(default="fa", pattern="^(fa|en|ar)$")
-    max_results: int = Field(default=5, ge=1, le=20)
-    filters: Optional[Dict[str, Any]] = None
-    use_cache: bool = Field(default=True)
-    use_reranking: bool = Field(default=True)
-    stream: bool = Field(default=False)
+    query: str = Field(
+        ..., 
+        min_length=1, 
+        max_length=settings.max_query_length,
+        description="User's question in natural language",
+        examples=["قانون مدنی در مورد مالکیت چه می‌گوید؟"]
+    )
+    conversation_id: Optional[str] = Field(
+        None,
+        description="Optional conversation ID to continue existing conversation",
+        examples=["550e8400-e29b-41d4-a716-446655440000"]
+    )
+    language: str = Field(
+        default="fa", 
+        pattern="^(fa|en|ar)$",
+        description="Query language (fa=Persian, en=English, ar=Arabic)",
+        examples=["fa"]
+    )
+    max_results: int = Field(
+        default=5, 
+        ge=1, 
+        le=20,
+        description="Maximum number of source documents to retrieve",
+        examples=[5]
+    )
+    filters: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Optional filters for document search",
+        examples=[{"jurisdiction": "جمهوری اسلامی ایران"}]
+    )
+    use_cache: bool = Field(
+        default=True,
+        description="Whether to use cached results if available",
+        examples=[True]
+    )
+    use_reranking: bool = Field(
+        default=True,
+        description="Whether to rerank search results for better relevance",
+        examples=[True]
+    )
+    stream: bool = Field(
+        default=False,
+        description="Whether to stream the response (for real-time display)",
+        examples=[False]
+    )
     
     @validator("query")
     def clean_query(cls, v):
@@ -47,13 +84,41 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     """Query response model."""
-    answer: str
-    sources: list[str]
-    conversation_id: str
-    message_id: str
-    tokens_used: int
-    processing_time_ms: int
-    cached: bool = False
+    answer: str = Field(
+        ...,
+        description="Generated answer to the user's question",
+        examples=["طبق ماده ۱۷۹ قانون مدنی، شکار کردن موجب تملک است..."]
+    )
+    sources: list[str] = Field(
+        ...,
+        description="List of source document IDs used to generate the answer",
+        examples=[["dee1acff-8131-49ec-b7ed-78d543dcc539", "abc123..."]]
+    )
+    conversation_id: str = Field(
+        ...,
+        description="Conversation ID (new or existing)",
+        examples=["550e8400-e29b-41d4-a716-446655440000"]
+    )
+    message_id: str = Field(
+        ...,
+        description="Unique ID for this message",
+        examples=["660e8400-e29b-41d4-a716-446655440001"]
+    )
+    tokens_used: int = Field(
+        ...,
+        description="Total tokens consumed for this query",
+        examples=[150]
+    )
+    processing_time_ms: int = Field(
+        ...,
+        description="Processing time in milliseconds",
+        examples=[1200]
+    )
+    cached: bool = Field(
+        default=False,
+        description="Whether this response was served from cache",
+        examples=[False]
+    )
 
 
 class FeedbackRequest(BaseModel):
@@ -72,22 +137,81 @@ class StreamToken(BaseModel):
 
 
 # Main query endpoint
-@router.post("/", response_model=QueryResponse)
+@router.post(
+    "/", 
+    response_model=QueryResponse,
+    summary="Process User Query",
+    description="""
+    Process a user's question through the RAG (Retrieval-Augmented Generation) pipeline.
+    
+    **Authentication:** Requires JWT Bearer token in Authorization header.
+    
+    **Process Flow:**
+    1. Validates user authentication and permissions
+    2. Checks daily query limits based on user tier
+    3. Retrieves relevant documents from vector database
+    4. Generates answer using LLM with retrieved context
+    5. Saves conversation history
+    6. Returns answer with sources and metadata
+    
+    **Rate Limits:**
+    - Free tier: 10 queries/day
+    - Basic tier: 50 queries/day
+    - Premium tier: 200 queries/day
+    - Enterprise tier: Unlimited
+    
+    **Example Request:**
+    ```json
+    {
+      "query": "قانون مدنی در مورد مالکیت چه می‌گوید؟",
+      "language": "fa",
+      "max_results": 5,
+      "use_cache": true
+    }
+    ```
+    
+    **Example Response:**
+    ```json
+    {
+      "answer": "طبق ماده ۱۷۹ قانون مدنی، شکار کردن موجب تملک است...",
+      "sources": ["dee1acff-8131-49ec-b7ed-78d543dcc539"],
+      "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
+      "message_id": "660e8400-e29b-41d4-a716-446655440001",
+      "tokens_used": 150,
+      "processing_time_ms": 1200,
+      "cached": false
+    }
+    ```
+    """,
+    responses={
+        200: {
+            "description": "Successful response with answer and sources",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "answer": "طبق ماده ۱۷۹ قانون مدنی، شکار کردن موجب تملک است...",
+                        "sources": ["dee1acff-8131-49ec-b7ed-78d543dcc539"],
+                        "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
+                        "message_id": "660e8400-e29b-41d4-a716-446655440001",
+                        "tokens_used": 150,
+                        "processing_time_ms": 1200,
+                        "cached": False
+                    }
+                }
+            }
+        },
+        401: {"description": "Invalid or missing JWT token"},
+        429: {"description": "Daily query limit exceeded"},
+        500: {"description": "Internal server error"}
+    }
+)
 async def process_query(
     request: QueryRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user_id)
 ) -> QueryResponse:
-    """
-    Process a user query through the RAG pipeline.
-    
-    This endpoint:
-    1. Validates user permissions
-    2. Processes the query through RAG
-    3. Saves conversation history
-    4. Returns the response
-    """
+    """Process a user query through the RAG pipeline."""
     try:
         # Get user profile
         user = await db.get(UserProfile, user_id)

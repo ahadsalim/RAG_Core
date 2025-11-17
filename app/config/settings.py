@@ -110,6 +110,13 @@ class Settings(BaseSettings):
     llm_max_tokens: int = Field(default=4096, ge=1, description="Maximum output tokens")
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperature for generation")
     
+    # LLM Classification (for query categorization)
+    llm_classification_api_key: Optional[str] = Field(default=None, description="API Key for classification LLM")
+    llm_classification_base_url: Optional[str] = Field(default=None, description="Base URL for classification LLM")
+    llm_classification_model: Optional[str] = Field(default=None, description="Model for classification")
+    llm_classification_max_tokens: int = Field(default=512, ge=1, description="Max tokens for classification")
+    llm_classification_temperature: float = Field(default=0.2, ge=0.0, le=2.0, description="Temperature for classification")
+    
     # Embedding Configuration (for Ingest project)
     embedding_model: str = Field(default="intfloat/multilingual-e5-base", description="Embedding model name")
     embedding_api_key: Optional[str] = Field(default=None, description="API Key for embeddings (if different)")

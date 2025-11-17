@@ -346,6 +346,7 @@ class SyncService:
                             "unit_type": doc.unit_type,
                             "unit_number": doc.unit_number,
                             "doc_type": doc.doc_type,
+                            "document_type": doc.doc_type,  # برای سازگاری
                             "document_title": doc.title_official,
                             "jurisdiction": doc.jurisdiction,
                             "authority": doc.authority,

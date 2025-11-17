@@ -16,6 +16,7 @@ from app.services.qdrant_service import QdrantService
 from app.services.local_embedding_service import get_local_embedding_service
 from app.llm.openai_provider import OpenAIProvider
 from app.llm.base import Message, LLMConfig
+from app.llm.classifier import QueryClassifier
 from app.core.dependencies import get_redis_client
 from app.config.settings import settings
 
@@ -68,6 +69,7 @@ class RAGPipeline:
         from app.services.embedding_service import get_embedding_service
         self.embedder = get_embedding_service()
         self.llm = OpenAIProvider()
+        self.classifier = QueryClassifier()  # LLM برای دسته‌بندی سوالات
         self.reranker = None  # Will be initialized if needed
         
     async def process(self, query: RAGQuery) -> RAGResponse:
@@ -83,6 +85,31 @@ class RAGPipeline:
         start_time = datetime.utcnow()
         
         try:
+            # Step 0: Classify query using LLM
+            classification = await self.classifier.classify(query.text, query.language)
+            
+            logger.info(
+                "Query classified",
+                category=classification.category,
+                confidence=classification.confidence
+            )
+            
+            # اگر سوال احوالپرسی، چرت‌وپرت، یا نامعتبر بود → پاسخ مستقیم
+            if classification.category != "business_question":
+                processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                
+                return RAGResponse(
+                    answer=classification.direct_response or "متاسفانه نمی‌توانم به این سوال پاسخ دهم.",
+                    chunks=[],
+                    sources=[],
+                    total_tokens=0,
+                    processing_time_ms=processing_time,
+                    cached=False,
+                    model_used=self.classifier.llm_config.model
+                )
+            
+            # فقط برای سوالات واقعی ادامه می‌دهیم
+            
             # Check cache if enabled
             if query.use_cache:
                 cached_response = await self._check_cache(query)
@@ -328,8 +355,9 @@ class RAGPipeline:
         context_parts = []
         for i, chunk in enumerate(chunks, 1):
             source_info = f"[منبع {i}]"
-            if chunk.metadata.get("document_title"):
-                source_info += f" {chunk.metadata['document_title']}"
+            work_title = chunk.metadata.get("work_title") or chunk.metadata.get("document_title")
+            if work_title:
+                source_info += f" {work_title}"
             if chunk.metadata.get("unit_number"):
                 source_info += f" - ماده {chunk.metadata['unit_number']}"
             
@@ -340,21 +368,23 @@ class RAGPipeline:
         # Build system prompt
         system_prompt = self._build_system_prompt(language, user_preferences)
         
-        # Build user message with preferences
-        user_message = f"""بر اساس اطلاعات زیر به سوال پاسخ دهید:
+        # Build user message
+        if language == "fa":
+            user_message = f"""سوال کاربر: {query}
 
 اطلاعات مرجع:
-{context}
+{context}"""
+        else:
+            user_message = f"""User question: {query}
 
-سوال: {query}"""
+Reference information:
+{context}"""
         
         # Add user preferences to the message if provided
         if user_preferences:
             prefs_text = self._format_user_preferences(user_preferences, language)
             if prefs_text:
                 user_message += f"\n\n{prefs_text}"
-        else:
-            user_message += "\n\nلطفاً پاسخی جامع و دقیق ارائه دهید و در صورت لزوم به منابع ارجاع دهید."
         
         # Build messages
         messages = [
@@ -375,31 +405,31 @@ class RAGPipeline:
     def _build_system_prompt(self, language: str, user_preferences: Optional[Dict[str, Any]] = None) -> str:
         """Build system prompt based on language and user preferences."""
         if language == "fa":
-            base_prompt = """شما یک دستیار حقوقی هوشمند هستید که به سوالات حقوقی بر اساس قوانین و مقررات ایران پاسخ می‌دهید.
+            base_prompt = """شما یک دستیار حقوقی هوشمند هستید که به سوالات کسب و کار بر اساس قوانین و مقررات ایران پاسخ می‌دهید.
 
 وظایف شما:
-1. پاسخ‌های دقیق و جامع بر اساس اطلاعات ارائه شده
-2. ارجاع به منابع و مواد قانونی مرتبط
-3. توضیح مفاهیم حقوقی به زبان ساده
-4. اشاره به نکات مهم و استثناها
+- پاسخ‌های دقیق و جامع بر اساس اطلاعات مرجع ارائه شده
+- ارجاع به منابع و مواد قانونی مرتبط
+- توضیح مفاهیم حقوقی به زبان ساده
+- اشاره به نکات مهم و استثناها
 
 محدودیت‌ها:
-- فقط بر اساس اطلاعات ارائه شده پاسخ دهید
+- فقط از اطلاعات مرجع ارائه شده استفاده کنید
 - از اظهار نظر شخصی خودداری کنید
-- در صورت عدم وجود اطلاعات کافی، صراحتاً اعلام کنید"""
+- اگر اطلاعات کافی ندارید، صراحتاً اعلام کنید"""
         else:
-            base_prompt = """You are an intelligent legal assistant answering legal questions based on laws and regulations.
+            base_prompt = """You are an intelligent legal assistant answering business questions based on laws and regulations.
 
 Your tasks:
-1. Provide accurate and comprehensive answers based on provided information
-2. Reference relevant legal sources and articles
-3. Explain legal concepts in simple language
-4. Highlight important points and exceptions
+- Provide accurate and comprehensive answers based on provided reference information
+- Reference relevant legal sources and articles
+- Explain legal concepts in simple language
+- Highlight important points and exceptions
 
 Limitations:
-- Answer only based on provided information
+- Only use the provided reference information
 - Avoid personal opinions
-- Explicitly state if information is insufficient"""
+- If information is insufficient, explicitly state it"""
         
         # Add user preferences to system prompt if provided
         if user_preferences:
@@ -502,28 +532,74 @@ Limitations:
         return ""
     
     def _extract_sources(self, chunks: List[RAGChunk]) -> List[str]:
-        """Extract unique sources from chunks."""
+        """Extract detailed sources from chunks with full context."""
         sources = []
         seen = set()
         
-        for chunk in chunks:
-            # Build source string
-            source_parts = []
+        for i, chunk in enumerate(chunks, 1):
+            metadata = chunk.metadata
+            source_lines = []
             
-            if chunk.metadata.get("document_title"):
-                source_parts.append(chunk.metadata["document_title"])
+            # 1. شماره منبع و متن کامل
+            source_lines.append(f"📌 منبع {i}:")
+            source_lines.append(f"📄 متن: {chunk.text}")
+            source_lines.append("")  # خط خالی
             
-            if chunk.metadata.get("unit_number"):
-                source_parts.append(f"ماده {chunk.metadata['unit_number']}")
+            # 2. نام قانون/سند و نوع
+            doc_type = metadata.get("document_type") or metadata.get("doc_type", "")
+            doc_title = metadata.get("document_title", "")
+            unit_type = metadata.get("unit_type", "")
             
-            if chunk.metadata.get("authority"):
-                source_parts.append(f"({chunk.metadata['authority']})")
+            # استفاده از work_title به جای document_title
+            work_title = metadata.get("work_title", "")
+            if not work_title:
+                work_title = doc_title
             
-            source = " - ".join(source_parts) if source_parts else chunk.source
+            if work_title:
+                source_lines.append(f"� نام سند: {work_title}")
+                if doc_type and doc_type != work_title:
+                    source_lines.append(f"📋 نوع: {doc_type}")
             
-            if source and source not in seen:
+            # 3. مسیر دقیق (از path_label یا ساخت دستی)
+            path_label = metadata.get("path_label", "")
+            
+            if path_label:
+                # استفاده از مسیر کامل از metadata
+                source_lines.append(f"📍 مسیر: {path_label}")
+            else:
+                # ساخت مسیر از فیلدهای جداگانه
+                unit_number = metadata.get("unit_number")
+                title = metadata.get("title", "")
+                
+                if unit_number:
+                    if unit_type == "article":
+                        source_lines.append(f"📍 ماده {unit_number}")
+                    elif unit_type:
+                        source_lines.append(f"📍 {unit_type} {unit_number}")
+                    else:
+                        source_lines.append(f"📍 ماده {unit_number}")
+                
+                if title and title != work_title:
+                    source_lines.append(f"   عنوان: {title}")
+            
+            # 4. مرجع تصویب (فقط برای غیر قوانین)
+            authority = metadata.get("authority", "")
+            
+            # تشخیص نوع سند - اگر قانون است، مرجع تصویب نمایش نده
+            is_law = work_title and ("قانون" in work_title.lower())
+            
+            # فقط برای بخشنامه/آیین‌نامه/رای مرجع تصویب نمایش داده می‌شود
+            if authority and not is_law:
+                source_lines.append(f"✅ مرجع تصویب: {authority}")
+            
+            # ساخت source نهایی
+            source = "\n".join(source_lines)
+            
+            # جلوگیری از تکرار بر اساس document_id + unit_number
+            source_key = f"{metadata.get('document_id', '')}_{metadata.get('unit_number', '')}"
+            if source_key not in seen:
                 sources.append(source)
-                seen.add(source)
+                seen.add(source_key)
         
         return sources
     

@@ -33,6 +33,7 @@ class RAGQuery:
     filters: Optional[Dict[str, Any]] = None
     use_cache: bool = True
     use_reranking: bool = True
+    user_preferences: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -118,7 +119,8 @@ class RAGPipeline:
                 query.text,
                 chunks,
                 query.language,
-                query.conversation_id
+                query.conversation_id,
+                query.user_preferences
             )
             
             # Step 6: Extract sources
@@ -306,7 +308,8 @@ class RAGPipeline:
         query: str,
         chunks: List[RAGChunk],
         language: str,
-        conversation_id: Optional[str]
+        conversation_id: Optional[str],
+        user_preferences: Optional[Dict[str, Any]] = None
     ) -> Tuple[str, int]:
         """
         Generate answer using LLM with retrieved context.
@@ -316,6 +319,7 @@ class RAGPipeline:
             chunks: Retrieved chunks
             language: Response language
             conversation_id: Optional conversation ID for context
+            user_preferences: Optional user preferences for response customization
             
         Returns:
             Generated answer and tokens used
@@ -334,22 +338,28 @@ class RAGPipeline:
         context = "\n\n".join(context_parts)
         
         # Build system prompt
-        system_prompt = self._build_system_prompt(language)
+        system_prompt = self._build_system_prompt(language, user_preferences)
         
-        # Build messages
-        messages = [
-            Message(role="system", content=system_prompt),
-            Message(
-                role="user",
-                content=f"""بر اساس اطلاعات زیر به سوال پاسخ دهید:
+        # Build user message with preferences
+        user_message = f"""بر اساس اطلاعات زیر به سوال پاسخ دهید:
 
 اطلاعات مرجع:
 {context}
 
-سوال: {query}
-
-لطفاً پاسخی جامع و دقیق ارائه دهید و در صورت لزوم به منابع ارجاع دهید."""
-            )
+سوال: {query}"""
+        
+        # Add user preferences to the message if provided
+        if user_preferences:
+            prefs_text = self._format_user_preferences(user_preferences, language)
+            if prefs_text:
+                user_message += f"\n\n{prefs_text}"
+        else:
+            user_message += "\n\nلطفاً پاسخی جامع و دقیق ارائه دهید و در صورت لزوم به منابع ارجاع دهید."
+        
+        # Build messages
+        messages = [
+            Message(role="system", content=system_prompt),
+            Message(role="user", content=user_message)
         ]
         
         # Add conversation history if available
@@ -362,10 +372,10 @@ class RAGPipeline:
         
         return response.content, response.usage["total_tokens"]
     
-    def _build_system_prompt(self, language: str) -> str:
-        """Build system prompt based on language."""
+    def _build_system_prompt(self, language: str, user_preferences: Optional[Dict[str, Any]] = None) -> str:
+        """Build system prompt based on language and user preferences."""
         if language == "fa":
-            return """شما یک دستیار حقوقی هوشمند هستید که به سوالات حقوقی بر اساس قوانین و مقررات ایران پاسخ می‌دهید.
+            base_prompt = """شما یک دستیار حقوقی هوشمند هستید که به سوالات حقوقی بر اساس قوانین و مقررات ایران پاسخ می‌دهید.
 
 وظایف شما:
 1. پاسخ‌های دقیق و جامع بر اساس اطلاعات ارائه شده
@@ -377,9 +387,8 @@ class RAGPipeline:
 - فقط بر اساس اطلاعات ارائه شده پاسخ دهید
 - از اظهار نظر شخصی خودداری کنید
 - در صورت عدم وجود اطلاعات کافی، صراحتاً اعلام کنید"""
-        
         else:
-            return """You are an intelligent legal assistant answering legal questions based on laws and regulations.
+            base_prompt = """You are an intelligent legal assistant answering legal questions based on laws and regulations.
 
 Your tasks:
 1. Provide accurate and comprehensive answers based on provided information
@@ -391,6 +400,106 @@ Limitations:
 - Answer only based on provided information
 - Avoid personal opinions
 - Explicitly state if information is insufficient"""
+        
+        # Add user preferences to system prompt if provided
+        if user_preferences:
+            pref_additions = []
+            
+            if user_preferences.get("response_style"):
+                style = user_preferences["response_style"]
+                if language == "fa":
+                    pref_additions.append(f"- سبک پاسخ: {style}")
+                else:
+                    pref_additions.append(f"- Response style: {style}")
+            
+            if user_preferences.get("detail_level"):
+                level = user_preferences["detail_level"]
+                if language == "fa":
+                    pref_additions.append(f"- سطح جزئیات: {level}")
+                else:
+                    pref_additions.append(f"- Detail level: {level}")
+            
+            if pref_additions:
+                if language == "fa":
+                    base_prompt += "\n\nترجیحات کاربر:\n" + "\n".join(pref_additions)
+                else:
+                    base_prompt += "\n\nUser preferences:\n" + "\n".join(pref_additions)
+        
+        return base_prompt
+    
+    def _format_user_preferences(self, preferences: Dict[str, Any], language: str) -> str:
+        """Format user preferences into a readable instruction for LLM."""
+        if not preferences:
+            return ""
+        
+        instructions = []
+        
+        if language == "fa":
+            if preferences.get("response_style"):
+                style_map = {
+                    "formal": "رسمی و تخصصی",
+                    "casual": "غیررسمی و ساده",
+                    "academic": "آکادمیک و علمی",
+                    "simple": "ساده و قابل فهم"
+                }
+                style = style_map.get(preferences["response_style"], preferences["response_style"])
+                instructions.append(f"سبک پاسخ: {style}")
+            
+            if preferences.get("detail_level"):
+                level_map = {
+                    "brief": "خلاصه و مختصر",
+                    "moderate": "متوسط",
+                    "comprehensive": "جامع و کامل",
+                    "detailed": "با جزئیات کامل"
+                }
+                level = level_map.get(preferences["detail_level"], preferences["detail_level"])
+                instructions.append(f"سطح جزئیات: {level}")
+            
+            if preferences.get("include_examples"):
+                if preferences["include_examples"]:
+                    instructions.append("لطفاً مثال‌های عملی ارائه دهید")
+            
+            if preferences.get("language_style"):
+                style_map = {
+                    "simple": "از زبان ساده استفاده کنید",
+                    "technical": "از اصطلاحات تخصصی استفاده کنید",
+                    "mixed": "ترکیبی از زبان ساده و تخصصی"
+                }
+                style = style_map.get(preferences["language_style"], preferences["language_style"])
+                instructions.append(style)
+            
+            if preferences.get("format"):
+                format_map = {
+                    "bullet_points": "پاسخ را به صورت نکات کلیدی ارائه دهید",
+                    "numbered_list": "پاسخ را به صورت لیست شماره‌دار ارائه دهید",
+                    "paragraph": "پاسخ را به صورت پاراگراف‌های منسجم ارائه دهید"
+                }
+                fmt = format_map.get(preferences["format"], preferences["format"])
+                instructions.append(fmt)
+            
+            if instructions:
+                return "راهنمای پاسخ:\n" + "\n".join(f"- {inst}" for inst in instructions)
+        
+        else:  # English
+            if preferences.get("response_style"):
+                instructions.append(f"Response style: {preferences['response_style']}")
+            
+            if preferences.get("detail_level"):
+                instructions.append(f"Detail level: {preferences['detail_level']}")
+            
+            if preferences.get("include_examples") and preferences["include_examples"]:
+                instructions.append("Please include practical examples")
+            
+            if preferences.get("language_style"):
+                instructions.append(f"Language style: {preferences['language_style']}")
+            
+            if preferences.get("format"):
+                instructions.append(f"Format: {preferences['format']}")
+            
+            if instructions:
+                return "Response guidelines:\n" + "\n".join(f"- {inst}" for inst in instructions)
+        
+        return ""
     
     def _extract_sources(self, chunks: List[RAGChunk]) -> List[str]:
         """Extract unique sources from chunks."""

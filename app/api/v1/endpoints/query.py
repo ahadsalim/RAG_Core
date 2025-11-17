@@ -73,6 +73,16 @@ class QueryRequest(BaseModel):
         description="Whether to stream the response (for real-time display)",
         examples=[False]
     )
+    user_preferences: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Optional user preferences to customize the response (e.g., tone, detail level, format)",
+        examples=[{
+            "response_style": "formal",
+            "detail_level": "comprehensive",
+            "include_examples": True,
+            "language_style": "simple"
+        }]
+    )
     
     @validator("query")
     def clean_query(cls, v):
@@ -269,7 +279,8 @@ async def process_query(
             max_chunks=request.max_results,
             filters=request.filters,
             use_cache=request.use_cache,
-            use_reranking=request.use_reranking
+            use_reranking=request.use_reranking,
+            user_preferences=request.user_preferences
         )
         
         # Process through RAG pipeline

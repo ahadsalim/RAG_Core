@@ -9,7 +9,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc
+from sqlalchemy import select, and_, desc, func
 from pydantic import BaseModel, Field
 import structlog
 
@@ -68,7 +68,10 @@ async def get_user_profile(
     user_id: str = Depends(get_current_user_id)
 ):
     """Get current user's profile."""
-    user = await db.get(UserProfile, user_id)
+    # Get user by external_user_id
+    stmt = select(UserProfile).where(UserProfile.external_user_id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
     
     if not user:
         raise HTTPException(
@@ -103,7 +106,10 @@ async def update_user_profile(
     user_id: str = Depends(get_current_user_id)
 ):
     """Update user profile settings."""
-    user = await db.get(UserProfile, user_id)
+    # Get user by external_user_id
+    stmt = select(UserProfile).where(UserProfile.external_user_id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
     
     if not user:
         raise HTTPException(
@@ -132,7 +138,10 @@ async def get_user_conversations(
     user_id: str = Depends(get_current_user_id)
 ):
     """Get user's conversations."""
-    user = await db.get(UserProfile, user_id)
+    # Get user by external_user_id
+    stmt_user = select(UserProfile).where(UserProfile.external_user_id == user_id)
+    result_user = await db.execute(stmt_user)
+    user = result_user.scalar_one_or_none()
     
     if not user:
         raise HTTPException(
@@ -176,8 +185,10 @@ async def get_conversation_messages(
     user_id: str = Depends(get_current_user_id)
 ):
     """Get messages in a conversation."""
-    # Verify conversation ownership
-    user = await db.get(UserProfile, user_id)
+    # Verify conversation ownership - Get user by external_user_id
+    stmt_user = select(UserProfile).where(UserProfile.external_user_id == user_id)
+    result_user = await db.execute(stmt_user)
+    user = result_user.scalar_one_or_none()
     conversation = await db.get(Conversation, conversation_id)
     
     if not conversation or conversation.user_id != user.id:
@@ -220,8 +231,10 @@ async def delete_conversation(
     user_id: str = Depends(get_current_user_id)
 ):
     """Delete a conversation and all its messages."""
-    # Verify conversation ownership
-    user = await db.get(UserProfile, user_id)
+    # Verify conversation ownership - Get user by external_user_id
+    stmt_user = select(UserProfile).where(UserProfile.external_user_id == user_id)
+    result_user = await db.execute(stmt_user)
+    user = result_user.scalar_one_or_none()
     conversation = await db.get(Conversation, conversation_id)
     
     if not conversation or conversation.user_id != user.id:
@@ -244,7 +257,10 @@ async def get_user_statistics(
     user_id: str = Depends(get_current_user_id)
 ):
     """Get user usage statistics."""
-    user = await db.get(UserProfile, user_id)
+    # Get user by external_user_id
+    stmt = select(UserProfile).where(UserProfile.external_user_id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
     
     if not user:
         raise HTTPException(
@@ -254,9 +270,9 @@ async def get_user_statistics(
     
     # Calculate statistics
     conversation_count = await db.scalar(
-        select(Conversation)
+        select(func.count())
+        .select_from(Conversation)
         .where(Conversation.user_id == user.id)
-        .count()
     )
     
     return {
@@ -279,7 +295,10 @@ async def clear_user_history(
     user_id: str = Depends(get_current_user_id)
 ):
     """Clear all user conversations and messages."""
-    user = await db.get(UserProfile, user_id)
+    # Get user by external_user_id
+    stmt_user = select(UserProfile).where(UserProfile.external_user_id == user_id)
+    result_user = await db.execute(stmt_user)
+    user = result_user.scalar_one_or_none()
     
     if not user:
         raise HTTPException(

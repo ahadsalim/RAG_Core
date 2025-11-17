@@ -10,6 +10,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from pydantic import BaseModel, Field, validator
 import structlog
 
@@ -213,18 +214,22 @@ async def process_query(
 ) -> QueryResponse:
     """Process a user query through the RAG pipeline."""
     try:
-        # Get user profile
-        user = await db.get(UserProfile, user_id)
+        # Get user profile by external_user_id
+        stmt = select(UserProfile).where(UserProfile.external_user_id == user_id)
+        result = await db.execute(stmt)
+        user = result.scalar_one_or_none()
+        
         if not user:
             # Create user profile if doesn't exist
             user = UserProfile(
-                id=user_id,
+                id=uuid.uuid4(),
                 external_user_id=user_id,
-                username=f"user_{user_id[:8]}",
+                username=f"user_{user_id[:8] if len(user_id) >= 8 else user_id}",
                 created_at=datetime.utcnow()
             )
             db.add(user)
             await db.commit()
+            await db.refresh(user)
         
         # Check user limits
         if not user.can_make_query():
@@ -248,9 +253,12 @@ async def process_query(
                 id=uuid.uuid4(),
                 user_id=user.id,
                 title=request.query[:100],  # Use first 100 chars as title
+                message_count=0,
+                total_tokens=0,
                 created_at=datetime.utcnow()
             )
             db.add(conversation)
+            await db.flush()  # Ensure conversation is persisted before use
         
         # Create RAG query
         rag_query = RAGQuery(

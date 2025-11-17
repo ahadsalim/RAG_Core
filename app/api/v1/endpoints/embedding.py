@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 import structlog
 
-from app.services.local_embedding_service import get_local_embedding_service
+from app.services.embedding_service import get_embedding_service
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -59,7 +59,7 @@ async def create_embeddings(request: EmbeddingRequest) -> EmbeddingResponse:
     """
     try:
         # Get embedding service
-        embedding_service = get_local_embedding_service()
+        embedding_service = get_embedding_service()
         
         # Handle both string and list inputs
         if isinstance(request.input, str):
@@ -85,7 +85,7 @@ async def create_embeddings(request: EmbeddingRequest) -> EmbeddingResponse:
         
         response = EmbeddingResponse(
             data=data,
-            model=request.model or embedding_service.model_name,
+            model=request.model or embedding_service.get_model_name(),
             usage=EmbeddingUsage(
                 prompt_tokens=prompt_tokens,
                 total_tokens=prompt_tokens

@@ -81,7 +81,7 @@ class QdrantService:
                     collection_name=self.collection_name,
                     vectors_config={
                         "default": VectorParams(
-                            size=3072,  # OpenAI text-embedding-3-large
+                            size=3072,  # For large embedding models (e.g., text-embedding-3-large)
                             distance=Distance.COSINE,
                         ),
                         "small": VectorParams(

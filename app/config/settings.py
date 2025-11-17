@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperature for generation")
     
     # Embedding Configuration (for Ingest project)
-    embedding_model: str = Field(default="text-embedding-3-large", description="Embedding model name")
+    embedding_model: str = Field(default="intfloat/multilingual-e5-base", description="Embedding model name")
     embedding_api_key: Optional[str] = Field(default=None, description="API Key for embeddings (if different)")
     embedding_base_url: Optional[str] = Field(default=None, description="Base URL for embeddings (if different)")
     

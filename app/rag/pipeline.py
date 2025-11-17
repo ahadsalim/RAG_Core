@@ -63,7 +63,9 @@ class RAGPipeline:
     def __init__(self):
         """Initialize RAG pipeline components."""
         self.qdrant = QdrantService()
-        self.embedder = get_local_embedding_service()  # Use local embedding
+        # Use unified embedding service (auto-detects API vs local)
+        from app.services.embedding_service import get_embedding_service
+        self.embedder = get_embedding_service()
         self.llm = OpenAIProvider()
         self.reranker = None  # Will be initialized if needed
         

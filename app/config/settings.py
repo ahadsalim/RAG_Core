@@ -63,8 +63,16 @@ class Settings(BaseSettings):
     database_echo: bool = Field(default=False)
     
     # Ingest Database (Read-only)
-    ingest_database_url: Optional[PostgresDsn] = Field(default=None)
+    ingest_database_url: Optional[str] = Field(default=None)
     ingest_database_pool_size: int = Field(default=10, ge=1)
+    
+    @field_validator('ingest_database_url', mode='before')
+    @classmethod
+    def validate_ingest_db_url(cls, v):
+        """Allow empty string for ingest_database_url."""
+        if v == "" or v is None:
+            return None
+        return v
     
     # Qdrant Vector Database
     qdrant_host: str = Field(default="localhost")

@@ -240,4 +240,18 @@ echo "  • Stop: cd $SCRIPT_DIR/docker && docker-compose stop"
 echo ""
 echo -e "${YELLOW}Documentation:${NC}"
 echo "  • $PROJECT_ROOT/document/README.md"
+echo "  • JWT Guide for Users System: $PROJECT_ROOT/USERS_SYSTEM_JWT_GUIDE.md"
+echo ""
+echo -e "${YELLOW}Integration with Users System:${NC}"
+# Read JWT_SECRET_KEY from .env
+JWT_SECRET=$(grep "^JWT_SECRET_KEY=" "$PROJECT_ROOT/.env" | cut -d'=' -f2 | tr -d '"')
+if [ -n "$JWT_SECRET" ]; then
+    echo "  • JWT_SECRET_KEY for Users System:"
+    echo "    ${JWT_SECRET}"
+    echo ""
+    echo "  [!] Users System must use this EXACT value in their .env file"
+    echo "  [!] See $PROJECT_ROOT/USERS_SYSTEM_JWT_GUIDE.md for details"
+else
+    print_warning "JWT_SECRET_KEY not found in .env"
+fi
 echo ""

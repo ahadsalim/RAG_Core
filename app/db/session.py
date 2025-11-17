@@ -48,20 +48,24 @@ async def init_db():
         expire_on_commit=False,
     )
     
-    # Ingest database (read-only)
-    ingest_engine = create_async_engine(
-        str(settings.ingest_database_url),
-        echo=False,
-        pool_size=settings.ingest_database_pool_size,
-        pool_pre_ping=True,
-        # poolclass is automatically selected for async engines
-    )
-    
-    ingest_session_factory = async_sessionmaker(
-        ingest_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
+    # Ingest database (read-only) - optional
+    if settings.ingest_database_url:
+        ingest_engine = create_async_engine(
+            str(settings.ingest_database_url),
+            echo=False,
+            pool_size=settings.ingest_database_pool_size,
+            pool_pre_ping=True,
+            # poolclass is automatically selected for async engines
+        )
+        
+        ingest_session_factory = async_sessionmaker(
+            ingest_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        logger.info("Ingest database engine initialized")
+    else:
+        logger.warning("Ingest database URL not configured - sync features will be disabled")
     
     logger.info("Database engines initialized")
 
@@ -100,7 +104,10 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 async def get_ingest_session() -> AsyncGenerator[AsyncSession, None]:
     """Get Ingest database session (read-only)."""
     if not ingest_session_factory:
-        raise RuntimeError("Ingest database not initialized")
+        raise RuntimeError(
+            "Ingest database not configured. "
+            "Please set INGEST_DATABASE_URL in .env to enable sync features."
+        )
     
     async with ingest_session_factory() as session:
         try:

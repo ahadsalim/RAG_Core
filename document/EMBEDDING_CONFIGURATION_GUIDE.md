@@ -182,8 +182,8 @@ curl -X POST http://localhost:7001/api/v1/embeddings \
 |-----------|--------------|---------------|
 | 512 | `small` | مدل‌های کوچک |
 | 768 | `medium` | multilingual-e5-base, BERT |
-| 1024 | `large` | e5-large, bge-m3 |
-| 1536 | `xlarge` | text-embedding-3-small |
+| 1024 | `large` | **e5-large**, bge-m3 |
+| 1536 | `xlarge` | text-embedding-3-small, ada-002 |
 | 3072 | `default` | text-embedding-3-large |
 
 ### تنظیم در Sync:
@@ -192,8 +192,8 @@ curl -X POST http://localhost:7001/api/v1/embeddings \
 # در Ingest system هنگام ارسال به Core:
 {
   "embeddings": [{
-    "vector": [...],  # 768 dimension
-    "vector_field": "medium",  # مطابق با dimension
+    "vector": [...],  # 1024 dimension (e5-large)
+    "vector_field": "large",  # مطابق با dimension
     ...
   }]
 }

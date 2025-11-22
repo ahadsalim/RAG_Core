@@ -33,7 +33,7 @@
   "embeddings": [
     {
       "id": "953652110735163",  // شناسه یکتا (string)
-      "vector": [0.1, 0.2, ...],  // بردار امبدینگ (768 بعد برای multilingual-e5-base)
+      "vector": [0.1, 0.2, ...],  // بردار امبدینگ (1024 بعد برای multilingual-e5-large)
       "text": "متن اصلی chunk",
       "document_id": "dee1acff-8131-49ec-b7ed-78d543dcc539",
       "metadata": {
@@ -190,7 +190,7 @@
       "metadata": {...}
     },
     "vectors": {
-      "medium": [0.1, 0.2, ...]  // 768 dimensions
+      "large": [0.1, 0.2, ...]  // 1024 dimensions
     }
   }
 }
@@ -202,7 +202,7 @@
 ```python
 class EmbeddingData:
     id: str  # شناسه یکتا
-    vector: List[float]  # بردار امبدینگ (768 بعد)
+    vector: List[float]  # بردار امبدینگ (1024 بعد)
     text: str  # متن اصلی
     document_id: str  # شناسه سند
     metadata: Dict[str, Any]  # متادیتای اضافی
@@ -246,9 +246,9 @@ metadata = {
 
 ### 1. مدل پیشنهادی
 ```python
-# استفاده از مدل multilingual-e5-base برای پشتیبانی از فارسی
-model_name = "intfloat/multilingual-e5-base"
-embedding_dim = 768  # ابعاد بردار
+# استفاده از مدل multilingual-e5-large برای پشتیبانی از فارسی
+model_name = "intfloat/multilingual-e5-large"
+embedding_dim = 1024  # ابعاد بردار
 
 # نرمال‌سازی بردارها
 normalized_vector = vector / np.linalg.norm(vector)
@@ -327,7 +327,7 @@ CREATE TABLE sync_queue (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     document_id UUID NOT NULL,
     embedding_id VARCHAR(255) NOT NULL,
-    vector VECTOR(768),
+    vector VECTOR(1024),
     text TEXT,
     metadata JSONB,
     status VARCHAR(20) DEFAULT 'pending', -- pending, processing, completed, failed
@@ -429,7 +429,7 @@ def validate_embedding(embedding: Dict) -> bool:
         return False
     
     # بررسی ابعاد بردار
-    if len(embedding["vector"]) != 768:
+    if len(embedding["vector"]) != 1024:
         return False
     
     # بررسی محدوده مقادیر بردار
@@ -523,7 +523,7 @@ async def main():
     embeddings = [
         {
             "id": "unique-id-123",
-            "vector": np.random.randn(768).tolist(),
+            "vector": np.random.randn(1024).tolist(),
             "text": "متن نمونه",
             "document_id": "doc-456",
             "metadata": {

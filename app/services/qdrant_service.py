@@ -89,11 +89,15 @@ class QdrantService:
                             distance=Distance.COSINE,
                         ),
                         "medium": VectorParams(
-                            size=768,  # BERT-based models
+                            size=768,  # BERT-based models, e5-base
                             distance=Distance.COSINE,
                         ),
                         "large": VectorParams(
-                            size=1536,  # OpenAI ada-002
+                            size=1024,  # e5-large, bge-m3
+                            distance=Distance.COSINE,
+                        ),
+                        "xlarge": VectorParams(
+                            size=1536,  # OpenAI ada-002, text-embedding-3-small
                             distance=Distance.COSINE,
                         ),
                     },

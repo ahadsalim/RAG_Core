@@ -276,8 +276,10 @@ class SyncService:
             return "small"
         elif dim <= 768:
             return "medium"
+        elif dim <= 1024:
+            return "large"  # e5-large, bge-m3
         elif dim <= 1536:
-            return "large"
+            return "xlarge"  # OpenAI ada-002, text-embedding-3-small
         else:
             return "default"  # 3072
     

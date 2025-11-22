@@ -89,7 +89,7 @@ class QdrantService:
                             distance=Distance.COSINE,
                         ),
                         "medium": VectorParams(
-                            size=768,  # BERT-based models, e5-base
+                            size=768,  # BERT-based models, e5-base (legacy)
                             distance=Distance.COSINE,
                         ),
                         "large": VectorParams(

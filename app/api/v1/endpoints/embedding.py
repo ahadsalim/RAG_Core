@@ -53,7 +53,7 @@ async def create_embeddings(request: EmbeddingRequest) -> EmbeddingResponse:
     ```json
     {
         "input": "سلام، این یک متن فارسی است",
-        "model": "intfloat/multilingual-e5-base"
+        "model": "intfloat/multilingual-e5-large"
     }
     ```
     """

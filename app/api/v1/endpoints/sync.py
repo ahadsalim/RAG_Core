@@ -27,7 +27,7 @@ router = APIRouter()
 class EmbeddingData(BaseModel):
     """Embedding data model."""
     id: str = Field(..., description="Unique embedding ID", examples=["953652110735163"])
-    vector: list[float] = Field(..., description="Embedding vector (768 dimensions for multilingual-e5-base)", examples=[[0.1, 0.2, 0.3]])
+    vector: list[float] = Field(..., description="Embedding vector (dimension auto-detected: 768d, 1024d, 1536d, etc.)", examples=[[0.1, 0.2, 0.3]])
     text: str = Field(..., description="Original text content", examples=["ماده ۱۷۹ - شکار کردن موجب تملک است."])
     document_id: str = Field(..., description="Source document ID", examples=["dee1acff-8131-49ec-b7ed-78d543dcc539"])
     metadata: Dict[str, Any] = Field(
@@ -142,8 +142,10 @@ async def sync_embeddings(
     try:
         sync_service = SyncService()
         
-        # Process embeddings
+        # Process embeddings and determine vector field based on dimension
         embeddings_data = []
+        vector_dims = set()
+        
         for emb in request.embeddings:
             embeddings_data.append({
                 "id": emb.id,
@@ -152,11 +154,24 @@ async def sync_embeddings(
                 "document_id": emb.document_id,
                 "metadata": emb.metadata
             })
+            vector_dims.add(len(emb.vector))
         
-        # Sync to Qdrant (using "medium" vector field for 768-dim embeddings)
+        # Auto-detect vector field based on dimension
+        if len(vector_dims) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Mixed vector dimensions in batch: {vector_dims}. All vectors must have the same dimension."
+            )
+        
+        dim = vector_dims.pop()
+        vector_field = sync_service._get_vector_field_by_dim(dim)
+        
+        logger.info(f"Auto-detected vector field: {vector_field} for dimension: {dim}")
+        
+        # Sync to Qdrant with auto-detected vector field
         synced_count = await sync_service.qdrant_service.upsert_embeddings(
             embeddings_data,
-            vector_field="medium"  # For multilingual-e5-base (768 dim)
+            vector_field=vector_field
         )
         
         logger.info(

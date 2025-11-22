@@ -230,24 +230,61 @@ async def delete_conversation(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user_id)
 ):
-    """Delete a conversation and all its messages."""
-    # Verify conversation ownership - Get user by external_user_id
-    stmt_user = select(UserProfile).where(UserProfile.external_user_id == user_id)
-    result_user = await db.execute(stmt_user)
-    user = result_user.scalar_one_or_none()
-    conversation = await db.get(Conversation, conversation_id)
+    """
+    Delete a conversation and all its messages.
     
-    if not conversation or conversation.user_id != user.id:
+    Returns:
+        - 200: Conversation deleted successfully
+        - 404: Conversation not found or doesn't belong to user
+        - 500: Database error during deletion
+    """
+    try:
+        # Verify conversation ownership - Get user by external_user_id
+        stmt_user = select(UserProfile).where(UserProfile.external_user_id == user_id)
+        result_user = await db.execute(stmt_user)
+        user = result_user.scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        conversation = await db.get(Conversation, conversation_id)
+        
+        if not conversation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation not found"
+            )
+        
+        if conversation.user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation not found"  # Don't reveal it exists
+            )
+        
+        # Delete conversation (cascade will delete messages)
+        await db.delete(conversation)
+        await db.commit()
+        
+        return {
+            "status": "success",
+            "message": "Conversation deleted successfully",
+            "conversation_id": conversation_id
+        }
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Log the error and rollback
+        await db.rollback()
+        logger.error(f"Failed to delete conversation {conversation_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete conversation"
         )
-    
-    # Delete conversation (cascade will delete messages)
-    await db.delete(conversation)
-    await db.commit()
-    
-    return {"status": "success", "message": "Conversation deleted"}
 
 
 # Get user statistics

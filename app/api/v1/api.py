@@ -14,7 +14,6 @@ from app.api.v1.endpoints import (
     embedding,
     tasks
 )
-from app.api.v1.endpoints import query_v2
 
 api_router = APIRouter()
 
@@ -23,13 +22,6 @@ api_router.include_router(
     query.router,
     prefix="/query",
     tags=["Query Processing"]
-)
-
-# V2 endpoint with MinIO link support
-api_router.include_router(
-    query_v2.router,
-    prefix="/query",
-    tags=["Query Processing V2"]
 )
 
 api_router.include_router(

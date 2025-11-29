@@ -7,13 +7,12 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, Field, validator
 import structlog
-import json
 
 from app.db.session import get_db
 from app.rag.pipeline import RAGPipeline, RAGQuery
@@ -29,8 +28,23 @@ router = APIRouter()
 
 
 # Request/Response Models
+class FileAttachment(BaseModel):
+    """File attachment model with MinIO link."""
+    filename: str = Field(..., description="Original filename")
+    minio_url: str = Field(..., description="MinIO object key")
+    file_type: str = Field(..., description="MIME type")
+    size_bytes: Optional[int] = Field(None, description="File size in bytes")
+    
+    @validator("filename")
+    def validate_filename(cls, v):
+        """Validate filename."""
+        if not v or len(v) < 1:
+            raise ValueError("Filename cannot be empty")
+        return v
+
+
 class QueryRequest(BaseModel):
-    """Query request model."""
+    """Query request model with file attachments."""
     query: str = Field(
         ..., 
         min_length=1, 
@@ -78,13 +92,18 @@ class QueryRequest(BaseModel):
     )
     user_preferences: Optional[Dict[str, Any]] = Field(
         None,
-        description="Optional user preferences to customize the response (e.g., tone, detail level, format)",
+        description="Optional user preferences to customize the response",
         examples=[{
             "response_style": "formal",
             "detail_level": "comprehensive",
             "include_examples": True,
             "language_style": "simple"
         }]
+    )
+    file_attachments: Optional[List[FileAttachment]] = Field(
+        None,
+        max_items=5,
+        description="List of file attachments (MinIO links from Users system)"
     )
     
     @validator("query")
@@ -93,6 +112,13 @@ class QueryRequest(BaseModel):
         v = v.strip()
         if len(v) < 3:
             raise ValueError("Query too short")
+        return v
+    
+    @validator("file_attachments")
+    def validate_files(cls, v):
+        """Validate file attachments."""
+        if v and len(v) > 5:
+            raise ValueError("Maximum 5 files allowed")
         return v
 
 
@@ -133,6 +159,10 @@ class QueryResponse(BaseModel):
         description="Whether this response was served from cache",
         examples=[False]
     )
+    files_processed: Optional[int] = Field(
+        None,
+        description="Number of files processed"
+    )
 
 
 class FeedbackRequest(BaseModel):
@@ -150,22 +180,28 @@ class StreamToken(BaseModel):
     finish_reason: Optional[str] = None
 
 
-# Main query endpoint with file upload support
+# Main query endpoint with MinIO file links
 @router.post(
     "/", 
     response_model=QueryResponse,
-    summary="Process User Query with Optional File Attachments",
+    summary="Process User Query with MinIO File Links",
     description="""
     Process a user's question through the RAG (Retrieval-Augmented Generation) pipeline.
-    Supports up to 5 file attachments (images, PDF, or text files) per query.
+    Accepts file links (MinIO object keys) from Users system instead of direct file uploads.
     
     **Authentication:** Requires JWT Bearer token in Authorization header.
     
+    **Workflow:**
+    1. Users system uploads files to MinIO
+    2. Users system sends query + MinIO object keys to RAG Core
+    3. RAG Core downloads files from MinIO
+    4. RAG Core processes files and generates answer
+    
     **Process Flow:**
     1. Validates user authentication and permissions
-    2. Processes uploaded files (OCR for images, text extraction for PDF/TXT)
-    3. Combines file content with user query
-    4. Checks daily query limits based on user tier
+    2. Downloads files from MinIO using provided object keys
+    3. Processes files (OCR for images, text extraction for PDF/TXT)
+    4. Combines file content with user query
     5. Retrieves relevant documents from vector database
     6. Generates answer using LLM with retrieved context
     7. Saves conversation history
@@ -175,7 +211,6 @@ class StreamToken(BaseModel):
     - Images: JPG, PNG, GIF, BMP, WEBP, TIFF (OCR processing)
     - Documents: PDF, TXT (text extraction)
     - Maximum 5 files per request
-    - Maximum file size: 10MB per file
     
     **Rate Limits:**
     - Free tier: 10 queries/day
@@ -183,23 +218,34 @@ class StreamToken(BaseModel):
     - Premium tier: 200 queries/day
     - Enterprise tier: Unlimited
     
-    **Example Request (with files):**
-    Form data:
-    - query: "این سند چه می‌گوید؟"
-    - files: [image1.jpg, document.pdf]
-    - language: "fa"
-    - max_results: 5
+    **Example Request:**
+    ```json
+    {
+      "query": "این سند چه می‌گوید؟",
+      "language": "fa",
+      "max_results": 5,
+      "file_attachments": [
+        {
+          "filename": "document.pdf",
+          "minio_url": "temp_uploads/user123/20241129_120000_abc_document.pdf",
+          "file_type": "application/pdf",
+          "size_bytes": 1024000
+        }
+      ]
+    }
+    ```
     
     **Example Response:**
     ```json
     {
-      "answer": "بر اساس اسناد ارسالی...",
+      "answer": "بر اساس سند ارسالی...",
       "sources": ["dee1acff-8131-49ec-b7ed-78d543dcc539"],
       "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
       "message_id": "660e8400-e29b-41d4-a716-446655440001",
       "tokens_used": 150,
       "processing_time_ms": 1200,
-      "cached": false
+      "cached": false,
+      "files_processed": 1
     }
     ```
     """,
@@ -215,7 +261,8 @@ class StreamToken(BaseModel):
                         "message_id": "660e8400-e29b-41d4-a716-446655440001",
                         "tokens_used": 150,
                         "processing_time_ms": 1200,
-                        "cached": False
+                        "cached": False,
+                        "files_processed": 1
                     }
                 }
             }
@@ -226,31 +273,13 @@ class StreamToken(BaseModel):
     }
 )
 async def process_query(
-    query: str = Form(..., description="User's question"),
-    conversation_id: Optional[str] = Form(None, description="Optional conversation ID"),
-    language: str = Form("fa", description="Query language"),
-    max_results: int = Form(5, description="Maximum results"),
-    filters: Optional[str] = Form(None, description="JSON filters"),
-    use_cache: bool = Form(True, description="Use cache"),
-    use_reranking: bool = Form(True, description="Use reranking"),
-    user_preferences: Optional[str] = Form(None, description="JSON user preferences"),
-    files: Optional[List[UploadFile]] = File(None, description="Up to 5 files (images/PDF/TXT)"),
-    background_tasks: BackgroundTasks = BackgroundTasks(),
+    request: QueryRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user_id)
 ) -> QueryResponse:
-    """Process a user query through the RAG pipeline with optional file attachments."""
+    """Process a user query with file links from Users system."""
     try:
-        # Parse JSON fields
-        filters_dict = json.loads(filters) if filters else None
-        user_preferences_dict = json.loads(user_preferences) if user_preferences else None
-        
-        # Validate files
-        if files and len(files) > 5:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Maximum 5 files allowed per request"
-            )
         
         # Get user profile by external_user_id
         stmt = select(UserProfile).where(UserProfile.external_user_id == user_id)
@@ -276,62 +305,63 @@ async def process_query(
                 detail="Daily query limit exceeded"
             )
         
-        # Process uploaded files if any
+        # Process file attachments if any
         file_context = ""
-        uploaded_file_metadata = []
+        processed_files_count = 0
         
-        if files:
-            logger.info(f"Processing {len(files)} uploaded files", user_id=user_id)
+        if request.file_attachments:
+            logger.info(
+                f"Processing {len(request.file_attachments)} file links from MinIO",
+                user_id=user_id
+            )
             
             # Get services
             file_processor = get_file_processing_service()
             storage_service = get_storage_service()
             
-            # Prepare files for processing
+            # Download and process files from MinIO
             file_data = []
-            for file in files:
-                content = await file.read()
-                file_data.append({
-                    'content': content,
-                    'filename': file.filename,
-                    'file_type': file.content_type or 'application/octet-stream'
-                })
+            for attachment in request.file_attachments:
+                try:
+                    # Download file from MinIO using the provided object key
+                    file_content = await storage_service.download_temp_file(
+                        attachment.minio_url
+                    )
+                    
+                    file_data.append({
+                        'content': file_content,
+                        'filename': attachment.filename,
+                        'file_type': attachment.file_type
+                    })
+                    
+                except Exception as e:
+                    logger.error(
+                        f"Failed to download file from MinIO: {e}",
+                        minio_url=attachment.minio_url,
+                        filename=attachment.filename
+                    )
+                    # Continue with other files
+                    continue
             
-            # Process files (extract text)
-            processing_results = await file_processor.process_multiple_files(file_data)
-            
-            # Upload to temporary storage
-            storage_results = await storage_service.upload_multiple_files(
-                files=file_data,
-                user_id=str(user.id),
-                expiration_hours=24
-            )
-            
-            # Combine extracted text
-            file_context = file_processor.combine_extracted_texts(processing_results)
-            
-            # Store metadata for response
-            uploaded_file_metadata = [
-                {
-                    'filename': res.get('filename'),
-                    'file_id': res.get('file_id'),
-                    'text_length': len(res.get('text', '')),
-                    'uploaded': res.get('uploaded', False)
-                }
-                for res in storage_results
-            ]
-            
-            logger.info(
-                "Files processed successfully",
-                user_id=user_id,
-                file_count=len(files),
-                total_text_length=len(file_context)
-            )
+            if file_data:
+                # Process files (extract text)
+                processing_results = await file_processor.process_multiple_files(file_data)
+                
+                # Combine extracted text
+                file_context = file_processor.combine_extracted_texts(processing_results)
+                processed_files_count = len([r for r in processing_results if r.get('text')])
+                
+                logger.info(
+                    "Files processed successfully",
+                    user_id=user_id,
+                    file_count=processed_files_count,
+                    total_text_length=len(file_context)
+                )
         
         # Get or create conversation
         conversation = None
-        if conversation_id:
-            conversation = await db.get(Conversation, conversation_id)
+        if request.conversation_id:
+            conversation = await db.get(Conversation, request.conversation_id)
             if conversation and conversation.user_id != user.id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -342,41 +372,41 @@ async def process_query(
             conversation = Conversation(
                 id=uuid.uuid4(),
                 user_id=user.id,
-                title=query[:100],  # Use first 100 chars as title
+                title=request.query[:100],
                 message_count=0,
                 total_tokens=0,
                 created_at=datetime.utcnow()
             )
             db.add(conversation)
-            await db.flush()  # Ensure conversation is persisted before use
+            await db.flush()
         
         # Combine query with file context
-        enhanced_query = query
+        enhanced_query = request.query
         if file_context:
-            enhanced_query = f"{query}\n\n[محتوای فایل‌های ضمیمه:]\n{file_context}"
+            enhanced_query = f"{request.query}\n\n[محتوای فایل‌های ضمیمه:]\n{file_context}"
         
         # Create RAG query
         rag_query = RAGQuery(
             text=enhanced_query,
             user_id=str(user.id),
             conversation_id=str(conversation.id),
-            language=language,
-            max_chunks=max_results,
-            filters=filters_dict,
-            use_cache=use_cache,
-            use_reranking=use_reranking,
-            user_preferences=user_preferences_dict
+            language=request.language,
+            max_chunks=request.max_results,
+            filters=request.filters,
+            use_cache=request.use_cache,
+            use_reranking=request.use_reranking,
+            user_preferences=request.user_preferences
         )
         
         # Process through RAG pipeline
         pipeline = RAGPipeline()
         rag_response = await pipeline.process(rag_query)
         
-        # Save user message (with file metadata if applicable)
-        user_message_content = query
-        if uploaded_file_metadata:
+        # Save user message
+        user_message_content = request.query
+        if request.file_attachments:
             file_info = "\n\n[فایل‌های ضمیمه: " + ", ".join(
-                [f"{f['filename']} ({f['text_length']} کاراکتر)" for f in uploaded_file_metadata]
+                [f"{f.filename}" for f in request.file_attachments]
             ) + "]"
             user_message_content += file_info
         
@@ -430,13 +460,13 @@ async def process_query(
             user_id=str(user.id),
             conversation_id=str(conversation.id),
             message_id=str(assistant_message.id),
-            query=query,
+            query=request.query,
             answer=rag_response.answer,
             sources=rag_response.sources,
             tokens_used=rag_response.total_tokens,
             processing_time_ms=rag_response.processing_time_ms,
-            has_attachments=bool(uploaded_file_metadata),
-            file_count=len(uploaded_file_metadata) if uploaded_file_metadata else 0
+            has_attachments=bool(request.file_attachments),
+            file_count=len(request.file_attachments) if request.file_attachments else 0
         )
         
         # Background task: Update user statistics
@@ -451,7 +481,8 @@ async def process_query(
             message_id=str(assistant_message.id),
             tokens_used=rag_response.total_tokens,
             processing_time_ms=rag_response.processing_time_ms,
-            cached=rag_response.cached
+            cached=rag_response.cached,
+            files_processed=processed_files_count if request.file_attachments else None
         )
         
     except HTTPException:

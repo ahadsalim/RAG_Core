@@ -172,7 +172,9 @@ class Settings(BaseSettings):
     s3_endpoint_url: str = Field(default="http://localhost:9000")
     s3_access_key_id: str = Field(default="minioadmin")
     s3_secret_access_key: str = Field(default="minioadmin")
-    s3_bucket_name: str = Field(default="core-storage")
+    s3_bucket_name: str = Field(default="core-storage", description="Legacy - use specific buckets instead")
+    s3_documents_bucket: str = Field(default="advisor-docs", description="Bucket for Ingest documents")
+    s3_temp_bucket: str = Field(default="temp-userfile", description="Bucket for temporary user files")
     s3_region: str = Field(default="us-east-1")
     s3_use_ssl: bool = Field(default=False)
     

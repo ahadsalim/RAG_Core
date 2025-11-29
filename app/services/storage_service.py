@@ -36,28 +36,33 @@ class StorageService:
             use_ssl=settings.s3_use_ssl
         )
         
-        self.bucket_name = settings.s3_bucket_name
+        # Bucket names
+        self.documents_bucket = settings.s3_documents_bucket  # advisor-docs
+        self.temp_bucket = settings.s3_temp_bucket  # temp-userfile
+        self.bucket_name = settings.s3_bucket_name  # Legacy
+        
         self.temp_prefix = "temp_uploads/"
         
-        # Ensure bucket exists
-        self._ensure_bucket_exists()
+        # Ensure buckets exist
+        self._ensure_bucket_exists(self.documents_bucket)
+        self._ensure_bucket_exists(self.temp_bucket)
     
-    def _ensure_bucket_exists(self):
+    def _ensure_bucket_exists(self, bucket_name: str):
         """Ensure the storage bucket exists."""
         try:
-            self.s3_client.head_bucket(Bucket=self.bucket_name)
-            logger.info(f"Bucket {self.bucket_name} exists")
+            self.s3_client.head_bucket(Bucket=bucket_name)
+            logger.info(f"Bucket {bucket_name} exists")
         except ClientError as e:
             error_code = e.response['Error']['Code']
             if error_code == '404':
                 # Bucket doesn't exist, create it
                 try:
-                    self.s3_client.create_bucket(Bucket=self.bucket_name)
-                    logger.info(f"Created bucket {self.bucket_name}")
+                    self.s3_client.create_bucket(Bucket=bucket_name)
+                    logger.info(f"Created bucket {bucket_name}")
                 except ClientError as create_error:
-                    logger.error(f"Failed to create bucket: {create_error}")
+                    logger.error(f"Failed to create bucket {bucket_name}: {create_error}")
             else:
-                logger.error(f"Error checking bucket: {e}")
+                logger.error(f"Error checking bucket {bucket_name}: {e}")
     
     async def upload_temp_file(
         self,
@@ -98,10 +103,10 @@ class StorageService:
                 'file_id': file_id
             }
             
-            # Upload to S3
+            # Upload to S3 (temp bucket for user files)
             def _upload_sync():
                 self.s3_client.put_object(
-                    Bucket=self.bucket_name,
+                    Bucket=self.temp_bucket,  # Use temp-userfile bucket
                     Key=object_key,
                     Body=file_content,
                     ContentType=content_type,
@@ -136,20 +141,23 @@ class StorageService:
             logger.error(f"Failed to upload file to temp storage: {e}", filename=filename)
             raise
     
-    async def download_temp_file(self, object_key: str) -> bytes:
+    async def download_temp_file(self, object_key: str, bucket: Optional[str] = None) -> bytes:
         """
         Download a file from temporary storage.
         
         Args:
             object_key: S3 object key
+            bucket: Bucket name (defaults to temp_bucket)
             
         Returns:
             File content as bytes
         """
         try:
+            bucket_name = bucket or self.temp_bucket
+            
             def _download_sync():
                 response = self.s3_client.get_object(
-                    Bucket=self.bucket_name,
+                    Bucket=bucket_name,
                     Key=object_key
                 )
                 return response['Body'].read()

@@ -121,21 +121,26 @@ curl -X POST http://rag-core:7001/api/v1/query/ \
 
 ---
 
-## 🐛 عیب‌یابی سریع
+## � عیب‌یابی
 
-### خطای 504 Timeout
+### مشکلات رایج
+
+#### 1. خطای 504 Timeout
 ```bash
+# غیرفعال کردن Query Classification
 echo "ENABLE_QUERY_CLASSIFICATION=false" >> .env
 docker-compose restart rag-core
 ```
 
-### خطای Embedding
+#### 2. خطای Embedding
 ```bash
+# بررسی لاگ
 docker logs rag-core | grep -i embedding
 ```
 
-### خطای MinIO
+#### 3. خطای MinIO
 ```bash
+# بررسی اتصال
 curl http://minio-server:9000/minio/health/live
 ```
 
@@ -151,8 +156,9 @@ curl http://minio-server:9000/minio/health/live
 
 ## 📝 تغییرات نسخه 2.0.0
 
-- ✅ پشتیبانی از فایل‌های ضمیمه (MinIO)
+- ✅ اضافه شدن پشتیبانی از فایل‌های ضمیمه (MinIO)
 - ✅ پردازش تصاویر با OCR (فارسی + انگلیسی)
 - ✅ پردازش PDF و TXT
 - ✅ بهبود Query Classification با Timeout
 - ✅ امکان غیرفعال کردن Classification
+- ✅ مستندات کامل API

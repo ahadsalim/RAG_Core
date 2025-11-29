@@ -43,13 +43,21 @@ class QueryClassifier:
         self.llm = OpenAIProvider(self.llm_config)
         logger.info(f"QueryClassifier initialized with model: {self.llm_config.model}")
     
-    async def classify(self, query: str, language: str = "fa") -> QueryCategory:
+    async def classify(
+        self,
+        query: str,
+        language: str = "fa",
+        context: Optional[str] = None,
+        file_analysis: Optional[str] = None
+    ) -> QueryCategory:
         """
-        دسته‌بندی سوال کاربر
+        دسته‌بندی سوال کاربر با در نظر گرفتن context و فایل‌ها
         
         Args:
             query: متن سوال کاربر
             language: زبان سوال (fa یا en)
+            context: خلاصه مکالمات قبلی
+            file_analysis: تحلیل فایل‌های ضمیمه
         
         Returns:
             QueryCategory با دسته، اطمینان، و پاسخ مستقیم (در صورت نیاز)
@@ -57,7 +65,18 @@ class QueryClassifier:
         try:
             # ساخت prompt برای دسته‌بندی
             system_prompt = self._build_classification_prompt(language)
-            user_message = f"متن کاربر: {query}"
+            
+            # ساخت پیام کاربر با context و file_analysis
+            user_message_parts = []
+            
+            if context:
+                user_message_parts.append(f"خلاصه مکالمات قبلی:\n{context}\n")
+            
+            if file_analysis:
+                user_message_parts.append(f"تحلیل فایل‌های ضمیمه:\n{file_analysis}\n")
+            
+            user_message_parts.append(f"سوال فعلی کاربر: {query}")
+            user_message = "\n".join(user_message_parts)
             
             messages = [
                 Message(role="system", content=system_prompt),

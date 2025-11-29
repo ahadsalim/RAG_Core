@@ -111,6 +111,7 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperature for generation")
     
     # LLM Classification (for query categorization)
+    enable_query_classification: bool = Field(default=True, description="Enable query classification (can disable for faster response)")
     llm_classification_api_key: Optional[str] = Field(default=None, description="API Key for classification LLM")
     llm_classification_base_url: Optional[str] = Field(default=None, description="Base URL for classification LLM")
     llm_classification_model: Optional[str] = Field(default=None, description="Model for classification")

@@ -1,18 +1,21 @@
-# 📚 مستندات سیستم RAG
+# 📚 مستندات سیستم RAG Core
 
-این پوشه شامل تمام مستندات فنی سیستم RAG سه‌لایه است.
+**نسخه:** 2.0.0  
+**آخرین به‌روزرسانی:** 2025-11-29
 
-## 📄 فهرست مستندات
+---
+
+## 📄 فهرست مستندات اصلی
 
 ### 1️⃣ مستندات سیستم مرکزی (Core)
 **فایل:** `1_CORE_SYSTEM_DOCUMENTATION.md`
 
-مستندات کامل سیستم Core شامل:
-- معماری و نصب
+**محتوا:**
+- معماری کامل سیستم
+- نصب و راه‌اندازی
 - پیکربندی و تنظیمات
-- API Reference
 - Celery و Background Tasks
-- عیب‌یابی
+- عیب‌یابی و مانیتورینگ
 
 **مخاطب:** تیم توسعه Core، DevOps
 
@@ -21,151 +24,135 @@
 ### 2️⃣ راهنمای یکپارچه‌سازی سیستم Ingest
 **فایل:** `2_INGEST_SYSTEM_API_GUIDE.md`
 
-راهنمای کامل برای تیم Ingest جهت ارسال داده به Core:
+**محتوا:**
 - API Endpoints برای همگام‌سازی
 - فرمت داده‌ها و Embeddings
-- الزامات امبدینگ (multilingual-e5-base, 768 بُعد)
+- الزامات امبدینگ (multilingual-e5-large, 1024 بُعد)
 - Batch Processing و Error Handling
 - نمونه کدهای Python
 
-**مخاطب:** تیم توسعه Ingest
+**مخاطب:** تیم Ingest
 
 ---
 
 ### 3️⃣ راهنمای یکپارچه‌سازی سیستم Users
 **فایل:** `3_USERS_SYSTEM_API_GUIDE.md`
 
-راهنمای کامل برای تیم Users جهت ارتباط با Core:
-- JWT Authentication
-- Query Processing APIs
+**محتوا:**
+- API Endpoints برای Query Processing
+- مدیریت کاربران و Conversations
+- Rate Limiting و Caching
 - Streaming Responses
-- مدیریت مکالمات و تاریخچه
-- User Tier Management
 - نمونه کدهای Python و JavaScript
 
-**مخاطب:** تیم توسعه Users (Frontend/Backend)
+**مخاطب:** تیم Users
 
 ---
 
-### 4️⃣ تقسیم وظایف بین زیرسیستم‌ها
-**فایل:** `4_SUBSYSTEMS_RESPONSIBILITIES.md`
+### 4️⃣ API ارسال Query با فایل (MinIO)
+**فایل:** `API_DOCUMENTATION.md`
 
-مستند معماری و تقسیم مسئولیت‌ها:
-- نقش هر زیرسیستم
-- جدول تفکیک وظایف
-- Data Flow بین سیستم‌ها
-- نکات مهم برای هر تیم
+**محتوا:**
+- ارسال Query همراه با فایل‌های ضمیمه
+- استفاده از MinIO برای ذخیره فایل
+- پردازش تصاویر (OCR) و PDF
+- نمونه کدهای کامل
+- عیب‌یابی و خطاهای رایج
 
-**مخاطب:** همه تیم‌ها، مدیران فنی، معماران
-
----
-
-### 5️⃣ راهنمای پیکربندی Embedding
-**فایل:** `EMBEDDING_CONFIGURATION_GUIDE.md`
-
-راهنمای کامل تنظیم و استفاده از Embedding:
-- API Mode vs Local Mode
-- Auto-detection بر اساس .env
-- مدل‌های پیشنهادی
-- Migration و تغییر مدل
-- هشدارها و Best Practices
-
-**مخاطب:** DevOps، تیم Core، تیم Ingest
+**مخاطب:** تیم Users
 
 ---
 
-### 6️⃣ راهنمای تنظیمات LLM و ذخیره‌سازی داده
-**فایل:** `LLM_CONFIGURATION_AND_DATA_STORAGE.md`
+## 🚀 شروع سریع
 
-راهنمای جامع تنظیمات LLM و معماری ذخیره‌سازی:
-- تنظیمات LLM برای بهبود کیفیت پاسخ
-- تنظیمات RAG و Reranking
-- ساختار ذخیره‌سازی چت و سوابق کاربر
-- تقسیم مسئولیت بین Core و Users
-- سناریوهای مختلف و تنظیمات پیشنهادی
-
-**مخاطب:** همه تیم‌ها، Product Manager، DevOps
-
----
-
-## 🎯 راهنمای سریع
-
-### برای تیم Ingest:
+### برای تیم Core
 ```bash
-# خواندن این فایل‌ها به ترتیب:
-1. 4_SUBSYSTEMS_RESPONSIBILITIES.md  # درک کلی معماری
-2. 2_INGEST_SYSTEM_API_GUIDE.md      # جزئیات فنی
+cd /srv/deployment
+sudo ./deploy.sh
 ```
 
-### برای تیم Users:
+### برای تیم Ingest
 ```bash
-# خواندن این فایل‌ها به ترتیب:
-1. 4_SUBSYSTEMS_RESPONSIBILITIES.md           # درک کلی معماری
-2. 3_USERS_SYSTEM_API_GUIDE.md                # جزئیات فنی
-3. LLM_CONFIGURATION_AND_DATA_STORAGE.md      # ذخیره‌سازی داده
+# مطالعه مستندات
+cat /srv/document/2_INGEST_SYSTEM_API_GUIDE.md
+
+# ارسال داده
+curl -X POST http://rag-core:7001/api/v1/sync/embeddings \
+  -H "X-Sync-API-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d @data.json
 ```
 
-### برای تیم Core:
+### برای تیم Users
 ```bash
-# خواندن این فایل‌ها:
-1. 1_CORE_SYSTEM_DOCUMENTATION.md             # مستندات داخلی
-2. 4_SUBSYSTEMS_RESPONSIBILITIES.md           # ارتباط با سایر سیستم‌ها
-3. EMBEDDING_CONFIGURATION_GUIDE.md           # تنظیمات Embedding
-4. LLM_CONFIGURATION_AND_DATA_STORAGE.md      # تنظیمات LLM
-```
+# مطالعه مستندات
+cat /srv/document/3_USERS_SYSTEM_API_GUIDE.md
+cat /srv/document/API_DOCUMENTATION.md
 
-### برای DevOps:
-```bash
-# خواندن این فایل‌ها:
-1. 1_CORE_SYSTEM_DOCUMENTATION.md             # نصب و راه‌اندازی
-2. EMBEDDING_CONFIGURATION_GUIDE.md           # پیکربندی Embedding
-3. LLM_CONFIGURATION_AND_DATA_STORAGE.md      # تنظیمات LLM
-```
-
-### برای Product Manager:
-```bash
-# خواندن این فایل‌ها:
-1. 4_SUBSYSTEMS_RESPONSIBILITIES.md           # معماری کلی
-2. LLM_CONFIGURATION_AND_DATA_STORAGE.md      # قابلیت‌ها و محدودیت‌ها
+# ارسال Query
+curl -X POST http://rag-core:7001/api/v1/query/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "سوال شما"}'
 ```
 
 ---
 
-## 🔑 نکات مهم
+## ⚙️ تنظیمات مهم
 
-### احراز هویت
-- **Ingest → Core**: API Key در header `X-API-Key`
-- **Users → Core**: JWT Token در header `Authorization: Bearer {token}`
+### Embedding Model
+- **Model:** `intfloat/multilingual-e5-large`
+- **Dimensions:** 1024
+- **Type:** Local (در Core اجرا می‌شود)
 
-### Endpoints اصلی
+### LLM
+- **Provider:** OpenAI-Compatible
+- **Model:** قابل تنظیم در `.env`
+- **Base URL:** قابل تنظیم برای Local LLM
+
+### Vector Database
+- **Type:** Qdrant
+- **Collection:** `documents`
+- **Distance:** Cosine
+
+### Rate Limiting
+- **Daily Limit:** 50 query per user
+- **قابل تنظیم:** در `.env`
+
+---
+
+## 🐛 عیب‌یابی سریع
+
+### خطای 504 Timeout
+```bash
+echo "ENABLE_QUERY_CLASSIFICATION=false" >> .env
+docker-compose restart rag-core
 ```
-Core Base URL: https://core.domain.com
 
-Ingest APIs:
-  POST /api/v1/sync/embeddings
-  GET  /api/v1/sync/status
-
-Users APIs:
-  POST /api/v1/query/
-  POST /api/v1/query/stream
-  GET  /api/v1/users/profile
+### خطای Embedding
+```bash
+docker logs rag-core | grep -i embedding
 ```
 
-### مدل Embedding
-```
-Model: intfloat/multilingual-e5-base
-Dimensions: 768
-Normalization: Required
+### خطای MinIO
+```bash
+curl http://minio-server:9000/minio/health/live
 ```
 
 ---
 
 ## 📞 پشتیبانی
 
-- **مستندات API:** https://core.domain.com/docs
-- **Health Check:** https://core.domain.com/health
-- **تیم Core:** core-team@domain.com
+- **Core Issues:** Backend Team
+- **Ingest Issues:** Data Team  
+- **Users Issues:** Frontend Team
 
 ---
 
-**آخرین بروزرسانی:** 2025-11-17
+## 📝 تغییرات نسخه 2.0.0
+
+- ✅ پشتیبانی از فایل‌های ضمیمه (MinIO)
+- ✅ پردازش تصاویر با OCR (فارسی + انگلیسی)
+- ✅ پردازش PDF و TXT
+- ✅ بهبود Query Classification با Timeout
+- ✅ امکان غیرفعال کردن Classification

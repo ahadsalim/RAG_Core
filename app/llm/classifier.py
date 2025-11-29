@@ -7,6 +7,7 @@ LLM-based Query Classifier
 """
 
 import json
+import asyncio
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
 from app.llm.base import LLMConfig, LLMProvider, Message
@@ -63,8 +64,11 @@ class QueryClassifier:
                 Message(role="user", content=user_message)
             ]
             
-            # فراخوانی LLM
-            response = await self.llm.generate(messages)
+            # فراخوانی LLM با timeout (5 ثانیه)
+            response = await asyncio.wait_for(
+                self.llm.generate(messages),
+                timeout=5.0
+            )
             
             # پارس کردن پاسخ JSON
             result = self._parse_classification_response(response.content)
@@ -76,13 +80,20 @@ class QueryClassifier:
             
             return result
             
+        except asyncio.TimeoutError:
+            logger.warning("Classification timeout (5s), defaulting to business question")
+            return QueryCategory(
+                category="business_question",
+                confidence=0.5,
+                reason="Classification timeout, defaulting to business question"
+            )
         except Exception as e:
             logger.error(f"Classification failed: {e}")
             # در صورت خطا، فرض می‌کنیم سوال واقعی است
             return QueryCategory(
                 category="business_question",
                 confidence=0.5,
-                reason="Classification failed, defaulting to business question"
+                reason=f"Classification failed: {str(e)}"
             )
     
     def _build_classification_prompt(self, language: str) -> str:

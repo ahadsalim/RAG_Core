@@ -85,17 +85,19 @@ class RAGPipeline:
         start_time = datetime.utcnow()
         
         try:
-            # Step 0: Classify query using LLM
-            classification = await self.classifier.classify(query.text, query.language)
-            
-            logger.info(
-                "Query classified",
-                category=classification.category,
-                confidence=classification.confidence
-            )
+            # Step 0: Classify query using LLM (if enabled)
+            classification = None
+            if settings.enable_query_classification:
+                classification = await self.classifier.classify(query.text, query.language)
+                
+                logger.info(
+                    "Query classified",
+                    category=classification.category,
+                    confidence=classification.confidence
+                )
             
             # اگر سوال احوالپرسی، چرت‌وپرت، یا نامعتبر بود → پاسخ مستقیم
-            if classification.category != "business_question":
+            if classification and classification.category != "business_question":
                 processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
                 
                 return RAGResponse(

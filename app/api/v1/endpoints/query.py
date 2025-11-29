@@ -6,6 +6,8 @@ Main endpoints for RAG query processing
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import uuid
+import asyncio
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
@@ -537,7 +539,6 @@ async def process_query_stream(
             response = await pipeline.process(rag_query)
             
             # Simulate streaming by chunking the response
-            import json
             words = response.answer.split()
             for i in range(0, len(words), 3):
                 chunk = " ".join(words[i:i+3])

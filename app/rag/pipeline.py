@@ -131,6 +131,14 @@ class RAGPipeline:
                 limit=query.max_chunks * 3  # Get more for reranking
             )
             
+            logger.info(
+                "Retrieved chunks",
+                query=query.text[:100],
+                enhanced_query=enhanced_query[:100],
+                num_chunks=len(chunks),
+                top_scores=[c.score for c in chunks[:3]] if chunks else []
+            )
+            
             # Step 4: Rerank if enabled
             if query.use_reranking and len(chunks) > query.max_chunks:
                 chunks = await self._rerank_chunks(
@@ -138,10 +146,25 @@ class RAGPipeline:
                     chunks,
                     top_k=query.max_chunks
                 )
+                logger.info(
+                    "Reranked chunks",
+                    final_count=len(chunks),
+                    top_scores=[c.score for c in chunks[:3]] if chunks else []
+                )
             else:
                 chunks = chunks[:query.max_chunks]
+                logger.info(
+                    "Using top chunks without reranking",
+                    count=len(chunks)
+                )
             
             # Step 5: Generate answer
+            logger.info(
+                "Generating answer",
+                num_chunks=len(chunks),
+                chunk_sources=[c.metadata.get('work_title', 'N/A')[:50] for c in chunks[:3]]
+            )
+            
             answer, tokens_used = await self._generate_answer(
                 query.text,
                 chunks,
@@ -180,7 +203,7 @@ class RAGPipeline:
     
     async def _enhance_query(self, query: RAGQuery) -> str:
         """
-        Enhance query for better retrieval.
+        Enhance query for better retrieval using LLM.
         
         Args:
             query: Original query
@@ -188,21 +211,66 @@ class RAGPipeline:
         Returns:
             Enhanced query text
         """
-        # For Persian queries, we might want to:
-        # 1. Fix common typos
-        # 2. Expand abbreviations
-        # 3. Add synonyms
-        
-        enhanced = query.text
-        
-        # Simple enhancement for now
-        if query.language == "fa":
-            # Persian-specific enhancements
-            enhanced = enhanced.replace("ق.م", "قانون مدنی")
-            enhanced = enhanced.replace("ق.ت", "قانون تجارت")
-            enhanced = enhanced.replace("ق.آ.د.ک", "قانون آیین دادرسی کیفری")
-        
-        return enhanced
+        # استفاده از LLM برای بهبود query
+        try:
+            if query.language == "fa":
+                system_prompt = """شما یک متخصص جستجوی اسناد حقوقی هستید.
+وظیفه شما: سوال کاربر را دریافت کرده و آن را برای جستجو در پایگاه داده بهینه کنید.
+
+کارهایی که باید انجام دهید:
+1. اختصارات قوانین را باز کنید (مثل ق.م → قانون مدنی، ق.ت.ا → قانون تأمین اجتماعی)
+2. اعداد فارسی را به انگلیسی تبدیل کنید (۱۲۳ → 123)
+3. اعداد کلامی را به عددی تبدیل کنید (ده → 10، بیست و پنج → 25)
+4. املای اشتباه را تصحیح کنید
+5. کلمات مترادف مهم اضافه کنید (در صورت نیاز)
+
+مهم: فقط query بهینه شده را برگردانید، بدون توضیح اضافی.
+
+مثال 1:
+ورودی: "ق.م ماده ۱۷۹"
+خروجی: "قانون مدنی ماده 179"
+
+مثال 2:
+ورودی: "ماده ده قانون چلمنگان"
+خروجی: "ماده 10 قانون چلمنگان"
+
+مثال 3:
+ورودی: "ق.ت.ا در مورد بازنشستگی"
+خروجی: "قانون تأمین اجتماعی بازنشستگی"
+
+فقط query بهینه شده را برگردانید."""
+
+                user_message = f"سوال کاربر: {query.text}"
+                
+                messages = [
+                    Message(role="system", content=system_prompt),
+                    Message(role="user", content=user_message)
+                ]
+                
+                # استفاده از LLM سبک‌تر برای enhancement
+                response = await self.llm.generate(
+                    messages,
+                    temperature=0.1,  # کم برای consistency
+                    max_tokens=200
+                )
+                
+                enhanced = response.content.strip()
+                
+                # اگر LLM چیز عجیبی برگرداند، از query اصلی استفاده کن
+                if not enhanced or len(enhanced) > len(query.text) * 3:
+                    enhanced = query.text
+                    logger.warning("LLM enhancement failed, using original query")
+                
+                logger.info(f"Query enhanced via LLM: '{query.text}' -> '{enhanced}'")
+                return enhanced
+                
+            else:
+                # برای زبان‌های دیگر فعلاً enhancement نداریم
+                return query.text
+                
+        except Exception as e:
+            logger.warning(f"Query enhancement failed: {e}, using original query")
+            return query.text
     
     @retry(
         stop=stop_after_attempt(3),
@@ -282,6 +350,13 @@ class RAGPipeline:
                 document_id=result.get("document_id")
             )
             chunks.append(chunk)
+        
+        logger.debug(
+            "Retrieved chunks from Qdrant",
+            count=len(chunks),
+            vector_field=vector_field,
+            top_3_docs=[c.metadata.get('work_title', 'N/A')[:30] for c in chunks[:3]]
+        )
         
         return chunks
     

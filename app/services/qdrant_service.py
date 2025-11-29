@@ -329,94 +329,42 @@ class QdrantService:
         """
         Perform hybrid search combining vector and keyword search.
         
+        NOTE: Qdrant's keyword search با FieldCondition.match فقط exact match را پشتیبانی می‌کند
+        و برای full-text search مناسب نیست. در حال حاضر فقط از vector search استفاده می‌کنیم.
+        
         Args:
             query_vector: Query embedding vector
-            query_text: Query text for keyword search
+            query_text: Query text for keyword search (currently unused)
             limit: Maximum number of results
-            vector_weight: Weight for vector search results
-            keyword_weight: Weight for keyword search results
+            vector_weight: Weight for vector search results (currently 1.0)
+            keyword_weight: Weight for keyword search results (currently 0.0)
             filters: Optional filters
             vector_field: Which vector field to search
             
         Returns:
-            Combined search results
+            Search results (currently vector-only)
         """
         try:
-            # Vector search
+            # فعلاً فقط از vector search استفاده می‌کنیم
+            # چون keyword search در Qdrant برای فارسی مناسب نیست
+            logger.debug(
+                "Hybrid search called (using vector-only for now)",
+                query_text=query_text[:50],
+                limit=limit
+            )
+            
+            # Vector search با threshold پایین‌تر
             vector_results = await self.search(
                 query_vector=query_vector,
-                limit=limit * 2,  # Get more results for merging
-                score_threshold=0.5,  # Lower threshold for hybrid
+                limit=limit,
+                score_threshold=0.4,  # Lower threshold for better recall
                 filters=filters,
                 vector_field=vector_field
             )
             
-            # Keyword search (using Qdrant's scroll with text filter)
-            keyword_filter_conditions = []
-            if filters:
-                for key, value in filters.items():
-                    keyword_filter_conditions.append(
-                        FieldCondition(key=key, match=MatchValue(value=value))
-                    )
-            
-            # Add text search condition
-            keywords = query_text.lower().split()
-            for keyword in keywords[:5]:  # Limit to 5 keywords
-                keyword_filter_conditions.append(
-                    FieldCondition(
-                        key="text",
-                        match=MatchValue(value=keyword)
-                    )
-                )
-            
-            keyword_filter = Filter(should=keyword_filter_conditions) if keyword_filter_conditions else None
-            
-            keyword_results = self.client.scroll(
-                collection_name=self.collection_name,
-                scroll_filter=keyword_filter,
-                limit=limit * 2,
-                with_payload=True,
-            )
-            
-            # Combine and rerank results
-            combined_results = {}
-            
-            # Add vector results
-            for result in vector_results:
-                result_id = result["id"]
-                combined_results[result_id] = {
-                    **result,
-                    "final_score": result["score"] * vector_weight
-                }
-            
-            # Add/update with keyword results
-            for point in keyword_results[0]:  # scroll returns (points, next_offset)
-                result_id = str(point.id)
-                keyword_score = 1.0  # Fixed score for keyword matches
-                
-                if result_id in combined_results:
-                    # Update existing result
-                    combined_results[result_id]["final_score"] += keyword_score * keyword_weight
-                else:
-                    # Add new result
-                    combined_results[result_id] = {
-                        "id": result_id,
-                        "score": 0,
-                        "text": point.payload.get("text", ""),
-                        "document_id": point.payload.get("document_id"),
-                        "metadata": point.payload.get("metadata", {}),
-                        "source": point.payload.get("source"),
-                        "final_score": keyword_score * keyword_weight
-                    }
-            
-            # Sort by final score and return top results
-            sorted_results = sorted(
-                combined_results.values(),
-                key=lambda x: x["final_score"],
-                reverse=True
-            )[:limit]
-            
-            return sorted_results
+            # Return vector results as-is
+            # در آینده می‌توانیم BM25 یا full-text search خارجی اضافه کنیم
+            return vector_results
             
         except Exception as e:
             logger.error(f"Hybrid search failed: {e}")

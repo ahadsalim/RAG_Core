@@ -49,6 +49,7 @@ celery_app.conf.update(
         'app.tasks.sync.*': {'queue': 'sync'},
         'app.tasks.notifications.*': {'queue': 'notifications'},
         'app.tasks.cleanup.*': {'queue': 'cleanup'},
+        'app.tasks.cleanup_files.*': {'queue': 'cleanup'},
         'app.tasks.user.*': {'queue': 'user'},
     },
     
@@ -78,6 +79,11 @@ celery_app.conf.update(
         'send-usage-stats': {
             'task': 'app.tasks.notifications.send_usage_statistics',
             'schedule': crontab(hour='*', minute=0),  # Every hour
+        },
+        # Cleanup expired temporary files every hour
+        'cleanup-temp-files': {
+            'task': 'cleanup_expired_temp_files',
+            'schedule': crontab(hour='*', minute=30),  # Every hour at :30
         },
     },
 )

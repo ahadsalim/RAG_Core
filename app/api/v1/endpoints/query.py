@@ -355,6 +355,7 @@ async def process_query_enhanced(
                 # استفاده از LLM به صورت عمومی (بدون RAG)
                 from app.llm.openai_provider import OpenAIProvider
                 from app.llm.base import LLMConfig, LLMProvider as LLMProviderEnum, Message
+                import pytz
                 
                 llm_config = LLMConfig(
                     provider=LLMProviderEnum.OPENAI_COMPATIBLE,
@@ -366,9 +367,22 @@ async def process_query_enhanced(
                 )
                 llm = OpenAIProvider(llm_config)
                 
-                # ساخت پیام‌ها
+                # دریافت تاریخ و ساعت فعلی
+                tehran_tz = pytz.timezone('Asia/Tehran')
+                now = datetime.now(tehran_tz)
+                current_date_fa = now.strftime('%Y/%m/%d')
+                current_time_fa = now.strftime('%H:%M')
+                
+                # ساخت پیام‌ها با تاریخ و ساعت
+                system_message = f"""شما یک دستیار هوشمند و دوستانه هستید که به سوالات عمومی کاربران پاسخ می‌دهید.
+
+**اطلاعات زمانی فعلی:**
+تاریخ: {current_date_fa} - ساعت: {current_time_fa}
+
+از این اطلاعات برای پاسخ به سوالات مرتبط با زمان استفاده کنید."""
+                
                 messages = [
-                    Message(role="system", content="شما یک دستیار هوشمند و دوستانه هستید که به سوالات عمومی کاربران پاسخ می‌دهید."),
+                    Message(role="system", content=system_message),
                     Message(role="user", content=request.query)
                 ]
                 

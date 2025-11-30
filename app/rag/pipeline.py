@@ -498,8 +498,23 @@ class RAGPipeline:
     
     def _build_system_prompt(self, language: str, user_preferences: Optional[Dict[str, Any]] = None) -> str:
         """Build system prompt based on language and user preferences."""
+        from datetime import datetime
+        import pytz
+        
+        # Get current date and time in Tehran timezone
+        tehran_tz = pytz.timezone('Asia/Tehran')
+        now = datetime.now(tehran_tz)
+        current_date_fa = now.strftime('%Y/%m/%d')  # 1403/09/10
+        current_time_fa = now.strftime('%H:%M')     # 16:17
+        current_datetime_str = f"تاریخ: {current_date_fa} - ساعت: {current_time_fa}"
+        
         if language == "fa":
-            base_prompt = """شما یک دستیار حقوقی و مشاور کسب و کار هوشمند هستید که به سوالات کاربران بر اساس قوانین و مقررات ایران پاسخ می‌دهید.
+            base_prompt = f"""شما یک دستیار حقوقی و مشاور کسب و کار هوشمند هستید که به سوالات کاربران بر اساس قوانین و مقررات ایران پاسخ می‌دهید.
+
+**اطلاعات زمانی فعلی:**
+{current_datetime_str}
+
+**توجه:** این تاریخ و ساعت برای تعیین اعتبار قوانین، مقررات، و منابع حیاتی است. همیشه این زمان را در نظر بگیرید.
 
 **وظایف شما:**
 - پاسخ‌های دقیق و جامع بر اساس اطلاعات مرجع ارائه شده
@@ -537,7 +552,17 @@ class RAGPipeline:
 
 **نکته حیاتی:** در تمام موارد، صداقت و شفافیت در ارائه اطلاعات اولویت دارد. اگر مطمئن نیستید، بهتر است اعلام کنید تا اطلاعات نادرست ارائه دهید."""
         else:
-            base_prompt = """You are an intelligent legal and business advisor answering questions based on laws and regulations.
+            # English prompt with current time
+            current_date_en = now.strftime('%Y-%m-%d')
+            current_time_en = now.strftime('%H:%M')
+            current_datetime_str_en = f"Date: {current_date_en} - Time: {current_time_en} (Tehran timezone)"
+            
+            base_prompt = f"""You are an intelligent legal and business advisor answering questions based on laws and regulations.
+
+**Current Date and Time:**
+{current_datetime_str_en}
+
+**Note:** This date and time is critical for determining the validity of laws, regulations, and sources. Always consider this time.
 
 **Your tasks:**
 - Provide accurate and comprehensive answers based on provided reference information

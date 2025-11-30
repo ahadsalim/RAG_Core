@@ -500,13 +500,17 @@ class RAGPipeline:
         """Build system prompt based on language and user preferences."""
         from datetime import datetime
         import pytz
+        import jdatetime
         
         # Get current date and time in Tehran timezone
         tehran_tz = pytz.timezone('Asia/Tehran')
         now = datetime.now(tehran_tz)
-        current_date_fa = now.strftime('%Y/%m/%d')  # 1403/09/10
-        current_time_fa = now.strftime('%H:%M')     # 16:17
-        current_datetime_str = f"تاریخ: {current_date_fa} - ساعت: {current_time_fa}"
+        
+        # Convert to Jalali (Shamsi) calendar
+        jalali_now = jdatetime.datetime.fromgregorian(datetime=now)
+        current_date_shamsi = jalali_now.strftime('%Y/%m/%d')  # 1404/09/10
+        current_time_fa = now.strftime('%H:%M')     # 16:24
+        current_datetime_str = f"تاریخ شمسی: {current_date_shamsi} - ساعت: {current_time_fa} (وقت تهران)"
         
         if language == "fa":
             base_prompt = f"""شما یک دستیار حقوقی و مشاور کسب و کار هوشمند هستید که به سوالات کاربران بر اساس قوانین و مقررات ایران پاسخ می‌دهید.
@@ -514,7 +518,19 @@ class RAGPipeline:
 **اطلاعات زمانی فعلی:**
 {current_datetime_str}
 
-**توجه:** این تاریخ و ساعت برای تعیین اعتبار قوانین، مقررات، و منابع حیاتی است. همیشه این زمان را در نظر بگیرید.
+**توجه بسیار مهم درباره تاریخ و اعتبار منابع:**
+1. تاریخ بالا، زمان فعلی است
+2. اگر کاربر به تاریخ خاصی اشاره کرد (مثلاً "در سال 1385")، باید منابع معتبر در **آن تاریخ** را استفاده کنید
+3. هر منبع دارای تاریخ اجرا (effective_date) و احتمالاً تاریخ انقضا (expiration_date) است
+4. برای تعیین اعتبار منبع در یک تاریخ خاص:
+   - منبع باید قبل از آن تاریخ اجرا شده باشد (effective_date <= target_date)
+   - منبع نباید منقضی شده باشد (expiration_date > target_date یا expiration_date = null)
+5. اگر کاربر تاریخ خاصی ذکر نکرد، از تاریخ فعلی استفاده کنید
+
+**مثال:**
+- سوال: "قانون ارث در زمان فوت پدرم (5 خرداد 1385) چه بود؟"
+- تاریخ هدف: 1385/03/05
+- منابع قابل استفاده: فقط منابعی که در 1385/03/05 معتبر بودند
 
 **وظایف شما:**
 - پاسخ‌های دقیق و جامع بر اساس اطلاعات مرجع ارائه شده
@@ -552,10 +568,10 @@ class RAGPipeline:
 
 **نکته حیاتی:** در تمام موارد، صداقت و شفافیت در ارائه اطلاعات اولویت دارد. اگر مطمئن نیستید، بهتر است اعلام کنید تا اطلاعات نادرست ارائه دهید."""
         else:
-            # English prompt with current time
-            current_date_en = now.strftime('%Y-%m-%d')
+            # English prompt with current time (Gregorian + Jalali)
+            current_date_gregorian = now.strftime('%Y-%m-%d')
             current_time_en = now.strftime('%H:%M')
-            current_datetime_str_en = f"Date: {current_date_en} - Time: {current_time_en} (Tehran timezone)"
+            current_datetime_str_en = f"Date: {current_date_gregorian} (Gregorian) / {current_date_shamsi} (Jalali/Shamsi) - Time: {current_time_en} (Tehran timezone)"
             
             base_prompt = f"""You are an intelligent legal and business advisor answering questions based on laws and regulations.
 

@@ -356,6 +356,7 @@ async def process_query_enhanced(
                 from app.llm.openai_provider import OpenAIProvider
                 from app.llm.base import LLMConfig, LLMProvider as LLMProviderEnum, Message
                 import pytz
+                import jdatetime
                 
                 llm_config = LLMConfig(
                     provider=LLMProviderEnum.OPENAI_COMPATIBLE,
@@ -367,17 +368,18 @@ async def process_query_enhanced(
                 )
                 llm = OpenAIProvider(llm_config)
                 
-                # دریافت تاریخ و ساعت فعلی
+                # دریافت تاریخ و ساعت فعلی (شمسی)
                 tehran_tz = pytz.timezone('Asia/Tehran')
                 now = datetime.now(tehran_tz)
-                current_date_fa = now.strftime('%Y/%m/%d')
+                jalali_now = jdatetime.datetime.fromgregorian(datetime=now)
+                current_date_shamsi = jalali_now.strftime('%Y/%m/%d')
                 current_time_fa = now.strftime('%H:%M')
                 
-                # ساخت پیام‌ها با تاریخ و ساعت
+                # ساخت پیام‌ها با تاریخ و ساعت شمسی
                 system_message = f"""شما یک دستیار هوشمند و دوستانه هستید که به سوالات عمومی کاربران پاسخ می‌دهید.
 
 **اطلاعات زمانی فعلی:**
-تاریخ: {current_date_fa} - ساعت: {current_time_fa}
+تاریخ شمسی: {current_date_shamsi} - ساعت: {current_time_fa} (وقت تهران)
 
 از این اطلاعات برای پاسخ به سوالات مرتبط با زمان استفاده کنید."""
                 

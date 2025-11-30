@@ -411,7 +411,7 @@ async def process_query_enhanced(
                     sources=[],
                     conversation_id=str(conversation.id),
                     message_id=str(assistant_msg.id),
-                    tokens_used=llm_response.usage.total_tokens if llm_response.usage else 0,
+                    tokens_used=llm_response.usage.get("total_tokens", 0) if llm_response.usage else 0,
                     processing_time_ms=processing_time,
                     file_analysis=file_analysis,
                     context_used=False

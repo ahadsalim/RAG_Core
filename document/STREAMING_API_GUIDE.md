@@ -9,10 +9,10 @@ API جدید برای دریافت پاسخ به صورت **تدریجی و لح
 ## 🔗 Endpoint
 
 ```
-POST https://core.tejarat.chat/api/v1/query/query_stream
+POST https://core.tejarat.chat/api/v1/query/stream
 ```
 
-**توجه:** این endpoint جدا از endpoint اصلی (`/api/v1/query/`) است و به موازات آن کار می‌کند.
+**توجه:** همان endpoint اصلی است اما با `/stream` در انتها.
 
 ---
 
@@ -173,7 +173,7 @@ Authorization: Bearer YOUR_JWT_TOKEN
 
 ```javascript
 async function streamQuery(query, conversationId = null) {
-  const response = await fetch('https://core.tejarat.chat/api/v1/query/query_stream', {
+  const response = await fetch('https://core.tejarat.chat/api/v1/query/stream', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -305,7 +305,7 @@ function useStreamQuery() {
     setSources([]);
 
     try {
-      const response = await fetch('https://core.tejarat.chat/api/v1/query/query_stream', {
+      const response = await fetch('https://core.tejarat.chat/api/v1/query/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -453,7 +453,7 @@ async function handleSubmit() {
   sources.value = [];
   
   try {
-    const response = await fetch('https://core.tejarat.chat/api/v1/query/query_stream', {
+    const response = await fetch('https://core.tejarat.chat/api/v1/query/stream', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -539,7 +539,7 @@ async function handleSubmit() {
 
 ## 🔄 مقایسه با API عادی
 
-| ویژگی | API عادی (`/query/`) | API استریم (`/query/query_stream`) |
+| ویژگی | API عادی (`/query/`) | API استریم (`/query/stream`) |
 |-------|---------------------|------------------------------|
 | نوع پاسخ | JSON یکجا | Server-Sent Events تدریجی |
 | زمان انتظار | کل پاسخ را منتظر بمانید | بلافاصله شروع می‌شود |

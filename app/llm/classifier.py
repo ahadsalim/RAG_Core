@@ -20,10 +20,11 @@ logger = structlog.get_logger()
 
 class QueryCategory(BaseModel):
     """دسته‌بندی سوال"""
-    category: str  # "greeting", "chitchat", "invalid", "business_question"
+    category: str  # "greeting", "chitchat", "invalid", "unclear", "business_question"
     confidence: float  # 0.0 to 1.0
-    direct_response: Optional[str] = None  # پاسخ مستقیم برای موارد غیر سوالی
+    direct_response: Optional[str] = None  # پاسخ مستقیم (برای همه دسته‌ها)
     reason: Optional[str] = None  # دلیل دسته‌بندی
+    needs_rag: bool = True  # آیا نیاز به RAG دارد؟
 
 
 class QueryClassifier:
@@ -66,16 +67,20 @@ class QueryClassifier:
             # ساخت prompt برای دسته‌بندی
             system_prompt = self._build_classification_prompt(language)
             
-            # ساخت پیام کاربر با context و file_analysis
+            # ساخت پیام کاربر با context و file_analysis (محدود شده)
             user_message_parts = []
             
+            # Context را محدود می‌کنیم تا گمراه‌کننده نباشد
             if context:
-                user_message_parts.append(f"خلاصه مکالمات قبلی:\n{context}\n")
+                context_preview = context[:500] + "..." if len(context) > 500 else context
+                user_message_parts.append(f"[Context مکالمه قبلی: {context_preview}]\n")
             
+            # File analysis را خلاصه می‌کنیم
             if file_analysis:
-                user_message_parts.append(f"تحلیل فایل‌های ضمیمه:\n{file_analysis}\n")
+                file_preview = file_analysis[:300] + "..." if len(file_analysis) > 300 else file_analysis
+                user_message_parts.append(f"[فایل ضمیمه: {file_preview}]\n")
             
-            user_message_parts.append(f"سوال فعلی کاربر: {query}")
+            user_message_parts.append(f"سوال کاربر: {query}")
             user_message = "\n".join(user_message_parts)
             
             messages = [
@@ -118,46 +123,64 @@ class QueryClassifier:
     def _build_classification_prompt(self, language: str) -> str:
         """ساخت prompt برای دسته‌بندی"""
         if language == "fa":
-            return """شما یک دسته‌بندی کننده هوشمند سوالات هستید.
+            return """شما یک دسته‌بندی کننده هوشمند و پاسخ‌دهنده سریع هستید.
 
-وظیفه شما: متن کاربر را دریافت کرده و آن را در یکی از دسته‌های زیر قرار دهید:
+وظیفه شما: سوال کاربر را دسته‌بندی کنید و در صورت امکان پاسخ سریع بدهید.
 
-1. **greeting** - احوالپرسی و سلام و علیک
-   مثال: "سلام", "درود", "چطوری", "خوبی", "صبح بخیر"
+**دسته‌بندی‌ها:**
 
-2. **chitchat** - گفتگوی عمومی و نامرتبط با کسب و کار
-   مثال: "هوا چطوره", "فوتبال دوست داری", "چه خبر"
+1. **greeting** - احوالپرسی
+   مثال: "سلام", "درود", "چطوری"
+   → پاسخ مستقیم بده، RAG لازم نیست
 
-3. **invalid** - محتوای نامعتبر، فحش، یا بی‌معنی
-   مثال: فحش، کاراکترهای تصادفی، spam
+2. **chitchat** - گفتگوی عمومی
+   مثال: "هوا چطوره", "چه خبر"
+   → پاسخ مستقیم بده، RAG لازم نیست
 
-4. **business_question** - سوال واقعی درباره کسب و کار، قانون، حقوق، مالیات، قرارداد، و ...
-   مثال: "قانون کار چه می‌گوید", "مالیات بر درآمد چقدر است", "قرارداد کار چیست"
+3. **invalid** - نامعتبر یا فحش
+   مثال: فحش، spam، کاراکترهای تصادفی
+   → پاسخ مستقیم بده، RAG لازم نیست
 
-قوانین مهم:
-- اگر سوال درباره موضوعات کسب و کار، حقوقی، مالی، قراردادی، مالیاتی باشد → business_question
-- فقط برای greeting, chitchat, invalid پاسخ مستقیم بده
-- برای business_question پاسخ مستقیم نده، فقط دسته‌بندی کن
+4. **unclear** - سوال مبهم یا ناقص
+   مثال: "بررسی کن", "چی؟", "این چیه"
+   → از کاربر توضیح بخواه، RAG لازم نیست
 
-خروجی را به صورت JSON برگردان:
+5. **business_question** - سوال واقعی کسب‌وکار/حقوقی
+   مثال: "قانون کار چیست", "مالیات چقدر است"
+   → اگر می‌توانی پاسخ کوتاه بده، وگرنه به RAG بفرست
+
+**قوانین مهم:**
+- برای greeting, chitchat, invalid, unclear: حتماً پاسخ مستقیم بده و needs_rag=false
+- برای business_question: اگر سوال ساده است، پاسخ کوتاه بده و needs_rag=false
+- برای business_question پیچیده: پاسخ نده و needs_rag=true
+- اگر فایل ضمیمه شده، احتمالاً business_question است
+- سوالات مبهم مثل "بررسی کن" بدون context → unclear
+
+**خروجی JSON:**
 {
-  "category": "greeting|chitchat|invalid|business_question",
+  "category": "greeting|chitchat|invalid|unclear|business_question",
   "confidence": 0.0-1.0,
-  "direct_response": "پاسخ مستقیم (فقط برای غیر business_question)",
-  "reason": "دلیل دسته‌بندی"
+  "direct_response": "پاسخ (همیشه پر کن)",
+  "needs_rag": true|false,
+  "reason": "دلیل"
 }
 
-مثال 1:
-ورودی: "سلام"
-خروجی: {"category": "greeting", "confidence": 0.95, "direct_response": "سلام! چطور می‌توانم کمک کنم؟", "reason": "احوالپرسی ساده"}
+**مثال‌ها:**
 
-مثال 2:
-ورودی: "قانون کار در مورد اخراج چه می‌گوید؟"
-خروجی: {"category": "business_question", "confidence": 0.98, "direct_response": null, "reason": "سوال حقوقی درباره قانون کار"}
+1. سلام
+{"category": "greeting", "confidence": 0.95, "direct_response": "سلام! چطور می‌توانم کمکتان کنم؟", "needs_rag": false, "reason": "احوالپرسی"}
 
-مثال 3:
-ورودی: "asdfghjkl"
-خروجی: {"category": "invalid", "confidence": 0.90, "direct_response": "متاسفانه متن شما قابل فهم نیست. لطفاً سوال خود را به صورت واضح بپرسید.", "reason": "کاراکترهای بی‌معنی"}
+2. بررسی کن
+{"category": "unclear", "confidence": 0.90, "direct_response": "لطفاً مشخص کنید چه چیزی را بررسی کنم؟ می‌توانید سوال خود را واضح‌تر بپرسید.", "needs_rag": false, "reason": "سوال مبهم بدون context"}
+
+3. قانون کار چیست؟
+{"category": "business_question", "confidence": 0.95, "direct_response": "قانون کار مجموعه قوانینی است که روابط کارگر و کارفرما را تنظیم می‌کند. برای اطلاعات دقیق‌تر، اجازه دهید در پایگاه داده جستجو کنم.", "needs_rag": true, "reason": "سوال پیچیده نیاز به RAG"}
+
+4. ماده 10 قانون کار چیست؟
+{"category": "business_question", "confidence": 0.98, "direct_response": null, "needs_rag": true, "reason": "سوال خاص نیاز به جستجو در پایگاه"}
+
+5. [فایل ضمیمه] + "بررسی کن"
+{"category": "business_question", "confidence": 0.85, "direct_response": "فایل شما را دریافت کردم. اجازه دهید آن را تحلیل کنم.", "needs_rag": true, "reason": "درخواست تحلیل فایل"}
 
 فقط JSON برگردان، هیچ توضیح اضافی نده."""
 
@@ -213,7 +236,8 @@ Only return JSON, no additional explanation."""
                 category=data.get("category", "business_question"),
                 confidence=float(data.get("confidence", 0.5)),
                 direct_response=data.get("direct_response"),
-                reason=data.get("reason")
+                reason=data.get("reason"),
+                needs_rag=data.get("needs_rag", True)
             )
             
         except json.JSONDecodeError as e:
@@ -228,12 +252,14 @@ Only return JSON, no additional explanation."""
                     category="greeting",
                     confidence=0.7,
                     direct_response="سلام! چطور می‌توانم کمک کنم؟",
-                    reason="Detected as greeting from response"
+                    reason="Detected as greeting from response",
+                    needs_rag=False
                 )
             
             # پیش‌فرض: سوال کسب و کار
             return QueryCategory(
                 category="business_question",
                 confidence=0.5,
-                reason="Failed to parse, defaulting to business question"
+                reason="Failed to parse, defaulting to business question",
+                needs_rag=True
             )

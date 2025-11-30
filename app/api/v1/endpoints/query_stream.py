@@ -176,13 +176,34 @@ async def stream_query_response(
 تاریخ شمسی: {current_date_shamsi} - ساعت: {current_time_fa} (وقت تهران)
 از این اطلاعات برای پاسخ به سوالات مرتبط با زمان استفاده کنید."""
                 
+                # Build user message with context for general_no_business
+                user_message_parts = []
+                
+                # 1. Long-term memory
+                if long_term_memory:
+                    user_message_parts.append(f"[خلاصه مکالمات قبلی]\n{long_term_memory}\n")
+                
+                # 2. Short-term memory
+                if short_term_memory:
+                    memory_text = "\n".join([
+                        f"{'کاربر' if m['role'] == 'user' else 'دستیار'}: {m['content']}"
+                        for m in short_term_memory
+                    ])
+                    user_message_parts.append(f"[مکالمات اخیر]\n{memory_text}\n")
+                
+                # 3. File analysis
+                if file_analysis:
+                    user_message_parts.append(f"[تحلیل فایل‌های ضمیمه]\n{file_analysis}\n")
+                
+                # 4. Current question
+                user_message_parts.append(f"[سوال فعلی]\n{request.query}")
+                
+                user_message = "\n".join(user_message_parts)
+                
                 messages = [
                     Message(role="system", content=system_msg),
-                    Message(role="user", content=request.query)
+                    Message(role="user", content=user_message)
                 ]
-                
-                if file_analysis:
-                    messages.append(Message(role="user", content=f"تحلیل فایل:\n{file_analysis}"))
                 
                 # Stream response
                 full_response = ""

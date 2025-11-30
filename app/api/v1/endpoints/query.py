@@ -383,16 +383,34 @@ async def process_query_enhanced(
 
 از این اطلاعات برای پاسخ به سوالات مرتبط با زمان استفاده کنید."""
                 
+                # ساخت user message با context
+                user_message_parts = []
+                
+                # 1. حافظه بلندمدت
+                if long_term_memory:
+                    user_message_parts.append(f"[خلاصه مکالمات قبلی]\n{long_term_memory}\n")
+                
+                # 2. حافظه کوتاه‌مدت
+                if short_term_memory:
+                    memory_text = "\n".join([
+                        f"{'کاربر' if m['role'] == 'user' else 'دستیار'}: {m['content']}"
+                        for m in short_term_memory
+                    ])
+                    user_message_parts.append(f"[مکالمات اخیر]\n{memory_text}\n")
+                
+                # 3. تحلیل فایل
+                if file_analysis:
+                    user_message_parts.append(f"[تحلیل فایل‌های ضمیمه]\n{file_analysis}\n")
+                
+                # 4. سوال فعلی
+                user_message_parts.append(f"[سوال فعلی]\n{request.query}")
+                
+                user_message = "\n".join(user_message_parts)
+                
                 messages = [
                     Message(role="system", content=system_message),
-                    Message(role="user", content=request.query)
+                    Message(role="user", content=user_message)
                 ]
-                
-                # اگر فایل دارد، اضافه کن
-                if file_analysis:
-                    messages.append(
-                        Message(role="user", content=f"تحلیل فایل‌های ضمیمه:\n{file_analysis}")
-                    )
                 
                 llm_response = await llm.generate(messages)
                 response_text = llm_response.content

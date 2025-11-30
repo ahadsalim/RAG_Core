@@ -237,7 +237,7 @@ async def process_query_enhanced(
             short_term_messages=len(short_term_memory)
         )
         
-        # ========== مرحله 5: کلاسیفیکیشن سوال ==========
+        # ========== مرحله 5: کلاسیفیکیشن دقیق سوال ==========
         classification = None
         
         if settings.enable_query_classification:
@@ -254,12 +254,18 @@ async def process_query_enhanced(
             logger.info(
                 "Query classified",
                 category=classification.category,
-                confidence=classification.confidence
+                confidence=classification.confidence,
+                has_meaningful_files=classification.has_meaningful_files,
+                needs_clarification=classification.needs_clarification
             )
             
-            # اگر سوال احوالپرسی یا چرت‌وپرت بود، پاسخ مستقیم بده
-            if classification.category != "business_question":
-                # ذخیره پیام‌ها
+            # ========== مسیر 1: invalid_no_file - متن نامعتبر بدون فایل ==========
+            if classification.category == "invalid_no_file":
+                logger.info("Handling invalid_no_file: asking for clarification")
+                
+                response_text = classification.direct_response or "متن شما قابل فهم نیست. لطفاً سوال خود را به صورت واضح و کامل بپرسید."
+                
+                # ذخیره در دیتابیس
                 user_msg = DBMessage(
                     id=uuid.uuid4(),
                     conversation_id=conversation.id,
@@ -273,7 +279,7 @@ async def process_query_enhanced(
                     id=uuid.uuid4(),
                     conversation_id=conversation.id,
                     role=MessageRole.ASSISTANT,
-                    content=classification.direct_response or "متوجه نشدم. لطفاً سوال خود را واضح‌تر بپرسید.",
+                    content=response_text,
                     created_at=datetime.utcnow()
                 )
                 db.add(assistant_msg)
@@ -285,18 +291,144 @@ async def process_query_enhanced(
                 processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
                 
                 return QueryResponse(
-                    answer=classification.direct_response or "متوجه نشدم.",
+                    answer=response_text,
+                    sources=[],
+                    conversation_id=str(conversation.id),
+                    message_id=str(assistant_msg.id),
+                    tokens_used=0,
+                    processing_time_ms=processing_time,
+                    file_analysis=None,
+                    context_used=False
+                )
+            
+            # ========== مسیر 2: invalid_with_file - متن مبهم با فایل ==========
+            elif classification.category == "invalid_with_file":
+                logger.info(
+                    "Handling invalid_with_file",
+                    has_meaningful_files=classification.has_meaningful_files
+                )
+                
+                # اگر فایل معنادار است، سوال هوشمندانه بپرس
+                # اگر فایل بی‌معنی است، درخواست توضیح کن
+                response_text = classification.direct_response or "لطفاً سوال خود را واضح‌تر بیان کنید."
+                
+                # ذخیره در دیتابیس
+                user_msg = DBMessage(
+                    id=uuid.uuid4(),
+                    conversation_id=conversation.id,
+                    role=MessageRole.USER,
+                    content=f"{request.query}\n[فایل‌های ضمیمه: {', '.join([f.filename for f in request.file_attachments])}]" if request.file_attachments else request.query,
+                    created_at=datetime.utcnow()
+                )
+                db.add(user_msg)
+                
+                assistant_msg = DBMessage(
+                    id=uuid.uuid4(),
+                    conversation_id=conversation.id,
+                    role=MessageRole.ASSISTANT,
+                    content=response_text,
+                    created_at=datetime.utcnow()
+                )
+                db.add(assistant_msg)
+                
+                conversation.message_count += 2
+                user.increment_query_count()
+                await db.commit()
+                
+                processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                
+                return QueryResponse(
+                    answer=response_text,
                     sources=[],
                     conversation_id=str(conversation.id),
                     message_id=str(assistant_msg.id),
                     tokens_used=0,
                     processing_time_ms=processing_time,
                     file_analysis=file_analysis,
-                    context_used=bool(context_for_classification)
+                    context_used=False
                 )
+            
+            # ========== مسیر 3: general_no_business - سوال عمومی غیر کسب‌وکار ==========
+            elif classification.category == "general_no_business":
+                logger.info("Handling general_no_business: using LLM without RAG")
+                
+                # استفاده از LLM به صورت عمومی (بدون RAG)
+                from app.llm.openai_provider import OpenAIProvider
+                from app.llm.base import LLMConfig, LLMProvider as LLMProviderEnum, Message
+                
+                llm_config = LLMConfig(
+                    provider=LLMProviderEnum.OPENAI_COMPATIBLE,
+                    model=settings.llm_model,
+                    api_key=settings.llm_api_key,
+                    base_url=settings.llm_base_url,
+                    temperature=0.7,
+                    max_tokens=1000,
+                )
+                llm = OpenAIProvider(llm_config)
+                
+                # ساخت پیام‌ها
+                messages = [
+                    Message(role="system", content="شما یک دستیار هوشمند و دوستانه هستید که به سوالات عمومی کاربران پاسخ می‌دهید."),
+                    Message(role="user", content=request.query)
+                ]
+                
+                # اگر فایل دارد، اضافه کن
+                if file_analysis:
+                    messages.append(
+                        Message(role="user", content=f"تحلیل فایل‌های ضمیمه:\n{file_analysis}")
+                    )
+                
+                llm_response = await llm.generate(messages)
+                response_text = llm_response.content
+                
+                # ذخیره در دیتابیس
+                user_msg = DBMessage(
+                    id=uuid.uuid4(),
+                    conversation_id=conversation.id,
+                    role=MessageRole.USER,
+                    content=request.query,
+                    created_at=datetime.utcnow()
+                )
+                db.add(user_msg)
+                
+                assistant_msg = DBMessage(
+                    id=uuid.uuid4(),
+                    conversation_id=conversation.id,
+                    role=MessageRole.ASSISTANT,
+                    content=response_text,
+                    created_at=datetime.utcnow()
+                )
+                db.add(assistant_msg)
+                
+                conversation.message_count += 2
+                user.increment_query_count()
+                await db.commit()
+                
+                processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                
+                return QueryResponse(
+                    answer=response_text,
+                    sources=[],
+                    conversation_id=str(conversation.id),
+                    message_id=str(assistant_msg.id),
+                    tokens_used=llm_response.usage.total_tokens if llm_response.usage else 0,
+                    processing_time_ms=processing_time,
+                    file_analysis=file_analysis,
+                    context_used=False
+                )
+            
+            # ========== مسیر 4 و 5: business_no_file و business_with_file ==========
+            # این دو مسیر به RAG Pipeline می‌روند (ادامه کد فعلی)
         
-        # ========== مرحله 6: ساخت Context کامل برای RAG ==========
-        # ترکیب تمام اطلاعات برای LLM
+        # ========== مرحله 6: ساخت Query و Context برای RAG ==========
+        # برای جلوگیری از hallucination:
+        # - Query برای embedding: فقط سوال اصلی (بدون context)
+        # - Context برای LLM: شامل حافظه + فایل + سوال
+        
+        # Query برای جستجو (فقط سوال اصلی)
+        search_query = request.query
+        
+        # Context برای LLM (شامل همه چیز)
         full_context_parts = []
         
         # 1. حافظه بلندمدت
@@ -318,11 +450,19 @@ async def process_query_enhanced(
         # 4. سوال فعلی
         full_context_parts.append(f"[سوال فعلی]\n{request.query}")
         
-        enhanced_query = "\n".join(full_context_parts)
+        llm_context = "\n".join(full_context_parts)
+        
+        logger.info(
+            "RAG query prepared",
+            search_query_length=len(search_query),
+            llm_context_length=len(llm_context),
+            has_file_analysis=bool(file_analysis),
+            has_memory=bool(long_term_memory or short_term_memory)
+        )
         
         # ========== مرحله 7: پردازش با RAG Pipeline ==========
         rag_query = RAGQuery(
-            text=enhanced_query,
+            text=search_query,  # فقط سوال اصلی برای embedding
             user_id=str(user.id),
             conversation_id=str(conversation.id),
             language=request.language,
@@ -334,7 +474,10 @@ async def process_query_enhanced(
         )
         
         pipeline = RAGPipeline()
-        rag_response = await pipeline.process(rag_query)
+        rag_response = await pipeline.process(
+            rag_query,
+            additional_context=llm_context  # Context کامل برای LLM
+        )
         
         # ========== مرحله 8: ذخیره پیام‌ها ==========
         # پیام کاربر

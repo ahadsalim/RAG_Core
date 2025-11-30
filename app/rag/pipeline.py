@@ -72,12 +72,13 @@ class RAGPipeline:
         self.classifier = QueryClassifier()  # LLM برای دسته‌بندی سوالات
         self.reranker = None  # Will be initialized if needed
         
-    async def process(self, query: RAGQuery) -> RAGResponse:
+    async def process(self, query: RAGQuery, additional_context: str = None) -> RAGResponse:
         """
         Process a query through the RAG pipeline.
         
         Args:
             query: RAG query request
+            additional_context: Additional context for LLM (memory, file analysis, etc.)
             
         Returns:
             RAG response with answer and sources
@@ -172,7 +173,8 @@ class RAGPipeline:
                 chunks,
                 query.language,
                 query.conversation_id,
-                query.user_preferences
+                query.user_preferences,
+                additional_context=additional_context
             )
             
             # Step 6: Extract sources
@@ -413,7 +415,8 @@ class RAGPipeline:
         chunks: List[RAGChunk],
         language: str,
         conversation_id: Optional[str],
-        user_preferences: Optional[Dict[str, Any]] = None
+        user_preferences: Optional[Dict[str, Any]] = None,
+        additional_context: str = None
     ) -> Tuple[str, int]:
         """
         Generate answer using LLM with retrieved context.
@@ -424,6 +427,7 @@ class RAGPipeline:
             language: Response language
             conversation_id: Optional conversation ID for context
             user_preferences: Optional user preferences for response customization
+            additional_context: Additional context (memory, file analysis, etc.)
             
         Returns:
             Generated answer and tokens used
@@ -447,15 +451,28 @@ class RAGPipeline:
         
         # Build user message
         if language == "fa":
-            user_message = f"""سوال کاربر: {query}
-
-اطلاعات مرجع:
-{context}"""
+            user_message_parts = []
+            
+            # اضافه کردن additional context (حافظه، فایل، و...)
+            if additional_context:
+                user_message_parts.append(additional_context)
+                user_message_parts.append("\n" + "="*50 + "\n")
+            
+            user_message_parts.append(f"""اطلاعات مرجع از پایگاه داده:
+{context}""")
+            
+            user_message = "\n".join(user_message_parts)
         else:
-            user_message = f"""User question: {query}
-
-Reference information:
-{context}"""
+            user_message_parts = []
+            
+            if additional_context:
+                user_message_parts.append(additional_context)
+                user_message_parts.append("\n" + "="*50 + "\n")
+            
+            user_message_parts.append(f"""Reference information from database:
+{context}""")
+            
+            user_message = "\n".join(user_message_parts)
         
         # Add user preferences to the message if provided
         if user_preferences:
@@ -482,18 +499,23 @@ Reference information:
     def _build_system_prompt(self, language: str, user_preferences: Optional[Dict[str, Any]] = None) -> str:
         """Build system prompt based on language and user preferences."""
         if language == "fa":
-            base_prompt = """شما یک دستیار حقوقی هوشمند هستید که به سوالات کسب و کار بر اساس قوانین و مقررات ایران پاسخ می‌دهید.
+            base_prompt = """شما یک دستیار حقوقی و مشاور کسب و کار هوشمند هستید که به سوالات کاربران بر اساس قوانین و مقررات ایران پاسخ می‌دهید.
 
-وظایف شما:
+**وظایف شما:**
 - پاسخ‌های دقیق و جامع بر اساس اطلاعات مرجع ارائه شده
 - ارجاع به منابع و مواد قانونی مرتبط
-- توضیح مفاهیم حقوقی به زبان ساده
+- توضیح مفاهیم حقوقی و تجاری به زبان ساده
 - اشاره به نکات مهم و استثناها
+- در نظر گرفتن تاریخچه مکالمات و فایل‌های ضمیمه (در صورت وجود)
 
-محدودیت‌ها:
-- فقط از اطلاعات مرجع ارائه شده استفاده کنید
-- از اظهار نظر شخصی خودداری کنید
-- اگر اطلاعات کافی ندارید، صراحتاً اعلام کنید"""
+**محدودیت‌های بسیار مهم:**
+- **فقط و فقط** از اطلاعات مرجع ارائه شده استفاده کنید
+- **هیچ‌گاه** اطلاعات جعلی یا خیالی تولید نکنید
+- **هرگز** به قوانین، مواد، یا مفاهیمی که در اطلاعات مرجع نیست اشاره نکنید
+- اگر اطلاعات کافی ندارید، **صراحتاً** اعلام کنید که "اطلاعات مرتبط در منابع موجود یافت نشد"
+- از اظهار نظر شخصی و حدس و گمان خودداری کنید
+
+**نکته حیاتی:** اگر سوال کاربر با اطلاعات مرجع ارتباطی ندارد، به صراحت بگویید که نمی‌توانید پاسخ دهید."""
         else:
             base_prompt = """You are an intelligent legal assistant answering business questions based on laws and regulations.
 

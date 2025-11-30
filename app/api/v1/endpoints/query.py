@@ -67,7 +67,7 @@ class QueryResponse(BaseModel):
 
 
 @router.post(
-    "/query/",
+    "/",
     response_model=QueryResponse,
     summary="پردازش سوال کاربر با قابلیت‌های پیشرفته",
     description="""

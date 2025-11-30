@@ -374,7 +374,7 @@ async def stream_query_response(
 
 
 @router.post(
-    "/stream",
+    "/query_stream",
     summary="پردازش سوال با پاسخ استریم",
     description="""
     این API سوال کاربر را پردازش کرده و پاسخ را به صورت استریم (Server-Sent Events) ارسال می‌کند.

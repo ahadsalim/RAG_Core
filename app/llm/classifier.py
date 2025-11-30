@@ -20,11 +20,12 @@ logger = structlog.get_logger()
 
 class QueryCategory(BaseModel):
     """دسته‌بندی سوال"""
-    category: str  # "greeting", "chitchat", "invalid", "unclear", "business_question"
+    category: str  # "invalid_no_file", "invalid_with_file", "general_no_business", "business_no_file", "business_with_file"
     confidence: float  # 0.0 to 1.0
-    direct_response: Optional[str] = None  # پاسخ مستقیم (برای همه دسته‌ها)
+    direct_response: Optional[str] = None  # پاسخ مستقیم برای موارد غیر سوالی
     reason: Optional[str] = None  # دلیل دسته‌بندی
-    needs_rag: bool = True  # آیا نیاز به RAG دارد؟
+    has_meaningful_files: Optional[bool] = None  # آیا فایل‌ها معنادار هستند؟
+    needs_clarification: bool = False  # آیا نیاز به توضیح بیشتر دارد؟
 
 
 class QueryClassifier:
@@ -67,20 +68,16 @@ class QueryClassifier:
             # ساخت prompt برای دسته‌بندی
             system_prompt = self._build_classification_prompt(language)
             
-            # ساخت پیام کاربر با context و file_analysis (محدود شده)
+            # ساخت پیام کاربر با context و file_analysis
             user_message_parts = []
             
-            # Context را محدود می‌کنیم تا گمراه‌کننده نباشد
             if context:
-                context_preview = context[:500] + "..." if len(context) > 500 else context
-                user_message_parts.append(f"[Context مکالمه قبلی: {context_preview}]\n")
+                user_message_parts.append(f"خلاصه مکالمات قبلی:\n{context}\n")
             
-            # File analysis را خلاصه می‌کنیم
             if file_analysis:
-                file_preview = file_analysis[:300] + "..." if len(file_analysis) > 300 else file_analysis
-                user_message_parts.append(f"[فایل ضمیمه: {file_preview}]\n")
+                user_message_parts.append(f"تحلیل فایل‌های ضمیمه:\n{file_analysis}\n")
             
-            user_message_parts.append(f"سوال کاربر: {query}")
+            user_message_parts.append(f"سوال فعلی کاربر: {query}")
             user_message = "\n".join(user_message_parts)
             
             messages = [
@@ -105,84 +102,186 @@ class QueryClassifier:
             return result
             
         except asyncio.TimeoutError:
-            logger.warning("Classification timeout (5s), defaulting to business question")
+            logger.warning("Classification timeout (5s), defaulting to business_no_file")
             return QueryCategory(
-                category="business_question",
+                category="business_no_file",
                 confidence=0.5,
-                reason="Classification timeout, defaulting to business question"
+                reason="Classification timeout, defaulting to business_no_file",
+                needs_clarification=False
             )
         except Exception as e:
             logger.error(f"Classification failed: {e}")
             # در صورت خطا، فرض می‌کنیم سوال واقعی است
             return QueryCategory(
-                category="business_question",
+                category="business_no_file",
                 confidence=0.5,
-                reason=f"Classification failed: {str(e)}"
+                reason=f"Classification failed: {str(e)}",
+                needs_clarification=False
             )
     
     def _build_classification_prompt(self, language: str) -> str:
         """ساخت prompt برای دسته‌بندی"""
         if language == "fa":
-            return """شما یک دسته‌بندی کننده هوشمند و پاسخ‌دهنده سریع هستید.
+            return """شما یک دسته‌بندی کننده هوشمند و دقیق سوالات کاربران هستید.
 
-وظیفه شما: سوال کاربر را دسته‌بندی کنید و در صورت امکان پاسخ سریع بدهید.
+**وظیفه:** متن کاربر و فایل‌های ضمیمه (در صورت وجود) را دریافت کرده و با دقت بالا در یکی از 5 دسته زیر قرار دهید:
 
-**دسته‌بندی‌ها:**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. **greeting** - احوالپرسی
-   مثال: "سلام", "درود", "چطوری"
-   → پاسخ مستقیم بده، RAG لازم نیست
+**1. invalid_no_file** - متن نامعتبر/مبهم/بی‌معنی بدون فایل
+   شامل: فحش، کاراکترهای تصادفی، جملات بی‌معنی، spam، متن مبهم کامل
+   مثال: "asdfgh", "!!!", "بررسی کن" (بدون فایل), "چیه این؟"
+   
+   **اقدام:** پاسخ مستقیم و کوتاه بده و از کاربر توضیح واضح بخواه
+   
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-2. **chitchat** - گفتگوی عمومی
-   مثال: "هوا چطوره", "چه خبر"
-   → پاسخ مستقیم بده، RAG لازم نیست
+**2. invalid_with_file** - متن نامعتبر/مبهم اما با فایل
+   شامل: متن مبهم + فایل ضمیمه
+   مثال: "بررسی کن" + فایل PDF، "چی میگه" + عکس
+   
+   **تحلیل فایل:**
+   - اگر فایل معنادار است (سند، قرارداد، فاکتور، تصویر مفید) → has_meaningful_files: true
+   - اگر فایل بی‌معنی است (عکس تصادفی، فایل خراب) → has_meaningful_files: false
+   
+   **اقدام:**
+   - فایل معنادار: به عنوان مشاور، بر اساس تحلیل فایل سوال هوشمندانه بپرس
+   - فایل بی‌معنی: از کاربر توضیح واضح بخواه
+   
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-3. **invalid** - نامعتبر یا فحش
-   مثال: فحش، spam، کاراکترهای تصادفی
-   → پاسخ مستقیم بده، RAG لازم نیست
+**3. general_no_business** - سوال مفهوم اما نامرتبط با کسب و کار
+   شامل: احوالپرسی، سوالات عمومی، جوک، پزشکی، ورزشی، سرگرمی، ...
+   مثال: "سلام چطوری", "هوا چطوره", "یک جوک بگو", "سردرد دارم چیکار کنم"
+   
+   **اقدام:** به صورت عمومی پاسخ بده (بدون استفاده از RAG)
+   توجه: اگر فایل دارد، فایل را هم در نظر بگیر
+   
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-4. **unclear** - سوال مبهم یا ناقص
-   مثال: "بررسی کن", "چی؟", "این چیه"
-   → از کاربر توضیح بخواه، RAG لازم نیست
+**4. business_no_file** - سوال مفهوم درباره کسب و کار بدون فایل
+   شامل: قانون، حقوق، مالیات، قرارداد، تجارت، شرکت، بیمه، کار، ...
+   مثال: "قانون کار چه می‌گوید؟", "مالیات بر ارزش افزوده چیست؟", "نحوه ثبت شرکت؟"
+   
+   **اقدام:** سوال را normalize کن و به RAG Pipeline بفرست
+   
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-5. **business_question** - سوال واقعی کسب‌وکار/حقوقی
-   مثال: "قانون کار چیست", "مالیات چقدر است"
-   → اگر می‌توانی پاسخ کوتاه بده، وگرنه به RAG بفرست
+**5. business_with_file** - سوال مفهوم درباره کسب و کار با فایل
+   شامل: سوال کسب و کار + فایل (سند، قرارداد، فاکتور، تصویر اسناد، ...)
+   مثال: "این قرارداد را بررسی کن" + PDF، "این فاکتور درست است؟" + عکس
+   
+   **اقدام:** 
+   1. تحلیل فایل
+   2. سوال را normalize کن
+   3. جستجو در RAG
+   4. ترکیب نتایج RAG + تحلیل فایل
+   5. تولید پاسخ جامع
+   
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 **قوانین مهم:**
-- برای greeting, chitchat, invalid, unclear: حتماً پاسخ مستقیم بده و needs_rag=false
-- برای business_question: اگر سوال ساده است، پاسخ کوتاه بده و needs_rag=false
-- برای business_question پیچیده: پاسخ نده و needs_rag=true
-- اگر فایل ضمیمه شده، احتمالاً business_question است
-- سوالات مبهم مثل "بررسی کن" بدون context → unclear
+
+1. **تشخیص کسب و کار:**
+   موضوعات کسب و کار شامل: قانون، حقوق، مالیات، قرارداد، تجارت، شرکت، بیمه، کار، استخدام، اخراج، حقوق و دستمزد، بازرگانی، صادرات، واردات، گمرک، ثبت شرکت، مالکیت فکری، ثبت اختراع، برند، لیسانس، مجوز، پروانه کسب، و هر موضوع مرتبط با فعالیت‌های اقتصادی و تجاری
+
+2. **تشخیص فایل معنادار:**
+   - معنادار: PDF اسناد، تصویر قرارداد، فاکتور، فرم، سند رسمی، جدول، نمودار
+   - بی‌معنی: عکس تصادفی، فایل خراب، تصویر بی‌ربط
+
+3. **متن مبهم:**
+   - "بررسی کن", "چیه این", "بگو", "توضیح بده" بدون context واضح → مبهم
+   - اما اگر فایل معنادار دارد → invalid_with_file با has_meaningful_files: true
+
+4. **پاسخ مستقیم:**
+   - فقط برای: invalid_no_file, invalid_with_file (فایل بی‌معنی), general_no_business
+   - برای business_no_file و business_with_file: direct_response = null
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 **خروجی JSON:**
+
 {
-  "category": "greeting|chitchat|invalid|unclear|business_question",
+  "category": "invalid_no_file | invalid_with_file | general_no_business | business_no_file | business_with_file",
   "confidence": 0.0-1.0,
-  "direct_response": "پاسخ (همیشه پر کن)",
-  "needs_rag": true|false,
-  "reason": "دلیل"
+  "direct_response": "پاسخ مستقیم (یا null)",
+  "reason": "دلیل دسته‌بندی",
+  "has_meaningful_files": true/false/null,
+  "needs_clarification": true/false
 }
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 **مثال‌ها:**
 
-1. سلام
-{"category": "greeting", "confidence": 0.95, "direct_response": "سلام! چطور می‌توانم کمکتان کنم؟", "needs_rag": false, "reason": "احوالپرسی"}
+**مثال 1:**
+ورودی: "asdfgh"
+فایل: ندارد
+خروجی:
+{
+  "category": "invalid_no_file",
+  "confidence": 0.95,
+  "direct_response": "متن شما قابل فهم نیست. لطفاً سوال خود را به صورت واضح و کامل بپرسید.",
+  "reason": "کاراکترهای بی‌معنی بدون فایل",
+  "has_meaningful_files": null,
+  "needs_clarification": true
+}
 
-2. بررسی کن
-{"category": "unclear", "confidence": 0.90, "direct_response": "لطفاً مشخص کنید چه چیزی را بررسی کنم؟ می‌توانید سوال خود را واضح‌تر بپرسید.", "needs_rag": false, "reason": "سوال مبهم بدون context"}
+**مثال 2:**
+ورودی: "بررسی کن"
+فایل: دارد - تحلیل فایل: "قرارداد کار بین شرکت الف و آقای احمدی"
+خروجی:
+{
+  "category": "invalid_with_file",
+  "confidence": 0.90,
+  "direct_response": "فایل شما یک قرارداد کار است. چه جنبه‌ای از این قرارداد را می‌خواهید بررسی کنم؟ آیا سوال خاصی درباره شرایط، حقوق، مدت قرارداد یا سایر بندها دارید؟",
+  "reason": "متن مبهم اما فایل معنادار - نیاز به توضیح بیشتر",
+  "has_meaningful_files": true,
+  "needs_clarification": true
+}
 
-3. قانون کار چیست؟
-{"category": "business_question", "confidence": 0.95, "direct_response": "قانون کار مجموعه قوانینی است که روابط کارگر و کارفرما را تنظیم می‌کند. برای اطلاعات دقیق‌تر، اجازه دهید در پایگاه داده جستجو کنم.", "needs_rag": true, "reason": "سوال پیچیده نیاز به RAG"}
+**مثال 3:**
+ورودی: "سلام، یک جوک بگو"
+فایل: ندارد
+خروجی:
+{
+  "category": "general_no_business",
+  "confidence": 0.98,
+  "direct_response": null,
+  "reason": "درخواست جوک - نامرتبط با کسب و کار",
+  "has_meaningful_files": null,
+  "needs_clarification": false
+}
 
-4. ماده 10 قانون کار چیست؟
-{"category": "business_question", "confidence": 0.98, "direct_response": null, "needs_rag": true, "reason": "سوال خاص نیاز به جستجو در پایگاه"}
+**مثال 4:**
+ورودی: "قانون کار در مورد اخراج چه می‌گوید؟"
+فایل: ندارد
+خروجی:
+{
+  "category": "business_no_file",
+  "confidence": 0.98,
+  "direct_response": null,
+  "reason": "سوال حقوقی واضح درباره قانون کار",
+  "has_meaningful_files": null,
+  "needs_clarification": false
+}
 
-5. [فایل ضمیمه] + "بررسی کن"
-{"category": "business_question", "confidence": 0.85, "direct_response": "فایل شما را دریافت کردم. اجازه دهید آن را تحلیل کنم.", "needs_rag": true, "reason": "درخواست تحلیل فایل"}
+**مثال 5:**
+ورودی: "این قرارداد را بررسی کن و بگو آیا شرایط آن منصفانه است؟"
+فایل: دارد - تحلیل فایل: "قرارداد خرید و فروش ملک"
+خروجی:
+{
+  "category": "business_with_file",
+  "confidence": 0.95,
+  "direct_response": null,
+  "reason": "سوال حقوقی واضح با فایل قرارداد",
+  "has_meaningful_files": true,
+  "needs_clarification": false
+}
 
-فقط JSON برگردان، هیچ توضیح اضافی نده."""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**فقط JSON خالص برگردان، بدون هیچ توضیح اضافی.**"""
 
         else:  # English
             return """You are an intelligent query classifier.
@@ -233,11 +332,12 @@ Only return JSON, no additional explanation."""
             data = json.loads(response)
             
             return QueryCategory(
-                category=data.get("category", "business_question"),
+                category=data.get("category", "business_no_file"),
                 confidence=float(data.get("confidence", 0.5)),
                 direct_response=data.get("direct_response"),
                 reason=data.get("reason"),
-                needs_rag=data.get("needs_rag", True)
+                has_meaningful_files=data.get("has_meaningful_files"),
+                needs_clarification=data.get("needs_clarification", False)
             )
             
         except json.JSONDecodeError as e:
@@ -247,19 +347,19 @@ Only return JSON, no additional explanation."""
             # fallback: تشخیص دستی
             response_lower = response.lower()
             
-            if any(word in response_lower for word in ["greeting", "سلام", "احوالپرسی"]):
+            if any(word in response_lower for word in ["invalid_no_file", "نامعتبر", "بی‌معنی"]):
                 return QueryCategory(
-                    category="greeting",
+                    category="invalid_no_file",
                     confidence=0.7,
-                    direct_response="سلام! چطور می‌توانم کمک کنم؟",
-                    reason="Detected as greeting from response",
-                    needs_rag=False
+                    direct_response="متن شما قابل فهم نیست. لطفاً سوال خود را به صورت واضح بپرسید.",
+                    reason="Detected as invalid from response",
+                    needs_clarification=True
                 )
             
             # پیش‌فرض: سوال کسب و کار
             return QueryCategory(
-                category="business_question",
+                category="business_no_file",
                 confidence=0.5,
-                reason="Failed to parse, defaulting to business question",
-                needs_rag=True
+                reason="Failed to parse, defaulting to business_no_file",
+                needs_clarification=False
             )

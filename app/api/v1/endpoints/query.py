@@ -254,12 +254,11 @@ async def process_query_enhanced(
             logger.info(
                 "Query classified",
                 category=classification.category,
-                confidence=classification.confidence,
-                needs_rag=classification.needs_rag
+                confidence=classification.confidence
             )
             
-            # اگر نیاز به RAG نداشت، پاسخ مستقیم بده
-            if not classification.needs_rag:
+            # اگر سوال احوالپرسی یا چرت‌وپرت بود، پاسخ مستقیم بده
+            if classification.category != "business_question":
                 # ذخیره پیام‌ها
                 user_msg = DBMessage(
                     id=uuid.uuid4(),

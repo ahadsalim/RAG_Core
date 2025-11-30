@@ -645,6 +645,45 @@ docker-compose restart qdrant
 docker-compose logs qdrant
 ```
 
+#### 5. خطای 504 Gateway Timeout
+
+**علامت:**
+```
+504 Gateway Timeout
+```
+
+**علت‌های احتمالی:**
+
+1. **Missing Dependencies:**
+```bash
+# بررسی لاگ
+docker logs core-api --tail 50 | grep -i "ModuleNotFoundError"
+
+# نصب dependency
+docker exec core-api pip install <package-name>
+docker restart core-api
+```
+
+2. **LLM Timeout:**
+```bash
+# غیرفعال کردن classification
+echo "ENABLE_QUERY_CLASSIFICATION=false" >> /srv/.env
+docker restart core-api
+```
+
+3. **MinIO Unreachable:**
+```bash
+# تست اتصال
+docker exec core-api curl -I https://s3.tejarat.chat
+
+# بررسی credentials
+docker exec core-api env | grep S3_
+```
+
+4. **فایل بزرگ:**
+- حجم فایل باید کمتر از 10MB باشد
+- برای فایل‌های بزرگتر، timeout را افزایش دهید
+
 ### لاگ‌ها
 
 ```bash

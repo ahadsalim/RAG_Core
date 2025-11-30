@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     health,
     query,
+    query_stream,
     users,
     admin,
     sync,
@@ -22,6 +23,12 @@ api_router.include_router(
     query.router,
     prefix="/query",
     tags=["Query Processing"]
+)
+
+api_router.include_router(
+    query_stream.router,
+    prefix="/query",
+    tags=["Query Processing - Streaming"]
 )
 
 api_router.include_router(

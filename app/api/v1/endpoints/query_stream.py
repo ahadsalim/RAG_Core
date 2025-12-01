@@ -178,7 +178,6 @@ async def stream_query_response(
                             current_time_fa=current_time_fa
                         )
                 else:  # general_no_business
-                    from app.config.prompts import SystemPrompts
                     system_msg = SystemPrompts.get_system_identity_short(
                         current_date_shamsi=current_date_shamsi,
                         current_time_fa=current_time_fa

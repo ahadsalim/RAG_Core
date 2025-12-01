@@ -501,6 +501,7 @@ class RAGPipeline:
         from datetime import datetime
         import pytz
         import jdatetime
+        from app.config.prompts import RAGPrompts
         
         # Get current date and time in Tehran timezone
         tehran_tz = pytz.timezone('Asia/Tehran')
@@ -510,7 +511,6 @@ class RAGPipeline:
         jalali_now = jdatetime.datetime.fromgregorian(datetime=now)
         current_date_shamsi = jalali_now.strftime('%Y/%m/%d')  # 1404/09/10
         current_time_fa = now.strftime('%H:%M')     # 16:24
-        current_datetime_str = f"تاریخ شمسی: {current_date_shamsi} - ساعت: {current_time_fa} (وقت تهران)"
         
         if language == "fa":
             base_prompt = f"""شما یک دستیار حقوقی و مشاور کسب و کار هوشمند هستید که به سوالات کاربران بر اساس قوانین و مقررات ایران پاسخ می‌دهید.

@@ -158,31 +158,30 @@ async def stream_query_response(
                 current_date_shamsi = jalali_now.strftime('%Y/%m/%d')
                 current_time_fa = now.strftime('%H:%M')
                 
+                from app.config.prompts import SystemPrompts
+                
                 if classification.category == "invalid_no_file":
-                    system_msg = f"""شما یک دستیار هوشمند هستید.
-تاریخ شمسی: {current_date_shamsi} - ساعت: {current_time_fa}
-متن کاربر قابل فهم نیست. از او بخواهید سوال خود را واضح‌تر بپرسد."""
+                    system_msg = SystemPrompts.get_invalid_no_file_prompt(
+                        current_date_shamsi=current_date_shamsi,
+                        current_time_fa=current_time_fa
+                    )
                 elif classification.category == "invalid_with_file":
                     if classification.has_meaningful_files:
-                        system_msg = f"""شما یک دستیار هوشمند هستید.
-تاریخ شمسی: {current_date_shamsi} - ساعت: {current_time_fa}
-فایل کاربر معنادار است اما متن او واضح نیست. سوال هوشمندانه‌ای بر اساس فایل بپرسید."""
+                        system_msg = SystemPrompts.get_invalid_with_file_meaningful_prompt(
+                            current_date_shamsi=current_date_shamsi,
+                            current_time_fa=current_time_fa
+                        )
                     else:
-                        system_msg = f"""شما یک دستیار هوشمند هستید.
-تاریخ شمسی: {current_date_shamsi} - ساعت: {current_time_fa}
-فایل و متن کاربر قابل فهم نیست. از او بخواهید واضح‌تر توضیح دهد."""
+                        system_msg = SystemPrompts.get_invalid_with_file_meaningless_prompt(
+                            current_date_shamsi=current_date_shamsi,
+                            current_time_fa=current_time_fa
+                        )
                 else:  # general_no_business
-                    system_msg = f"""شما یک دستیار هوشمند حقوقی و مشاور کسب‌وکار هستید.
-
-**درباره شما:**
-- نام: دستیار هوشمند تجارت چت
-- تخصص: مشاوره حقوقی، قوانین ایران، کسب‌وکار، قراردادها، مالیات
-- قابلیت‌ها: پاسخ به سوالات حقوقی، تحلیل اسناد، مشاوره کسب‌وکار، جستجو در قوانین، RAG
-
-**اطلاعات زمانی:**
-تاریخ شمسی: {current_date_shamsi} - ساعت: {current_time_fa} (وقت تهران)
-
-**نکته:** اگر سوال درباره خودتان است، توضیحات کامل و تخصصی بدهید."""
+                    from app.config.prompts import SystemPrompts
+                    system_msg = SystemPrompts.get_system_identity_short(
+                        current_date_shamsi=current_date_shamsi,
+                        current_time_fa=current_time_fa
+                    )
                 
                 # Build user message with context for general_no_business
                 user_message_parts = []

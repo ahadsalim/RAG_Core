@@ -376,25 +376,12 @@ async def process_query_enhanced(
                 current_time_fa = now.strftime('%H:%M')
                 
                 # ساخت پیام‌ها با تاریخ و ساعت شمسی
-                system_message = f"""شما یک دستیار هوشمند حقوقی و مشاور کسب‌وکار هستید که به سوالات عمومی کاربران پاسخ می‌دهید.
-
-**درباره شما:**
-- نام: دستیار هوشمند کسب و کار
-- تخصص: مشاوره حقوقی، قوانین ایران، کسب‌وکار، قراردادها، مالیات
-- قابلیت‌ها: 
-  • پاسخ به سوالات حقوقی بر اساس قوانین ایران
-  • تحلیل اسناد و قراردادها
-  • مشاوره کسب‌وکار
-  • جستجو در پایگاه داده قوانین و مقررات
-  • استفاده از منابع حقوقی برای پاسخ‌های دقیق
-
-**اطلاعات زمانی فعلی:**
-تاریخ شمسی: {current_date_shamsi} - ساعت: {current_time_fa} (وقت تهران)
-
-**نکته مهم:** 
-- اگر سوال درباره خودتان است، توضیحات کامل و تخصصی بدهید
-- اگر سوال عمومی است، پاسخ دوستانه و مفید بدهید
-- از اطلاعات زمانی برای پاسخ به سوالات مرتبط با زمان استفاده کنید"""
+                from app.config.prompts import SystemPrompts, LLMConfig
+                
+                system_message = SystemPrompts.get_system_identity(
+                    current_date_shamsi=current_date_shamsi,
+                    current_time_fa=current_time_fa
+                )
                 
                 # ساخت user message با context
                 user_message_parts = []

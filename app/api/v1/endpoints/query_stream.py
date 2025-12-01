@@ -147,6 +147,10 @@ async def stream_query_response(
                 file_analysis=file_analysis
             )
             
+            # اگر invalid_no_file است اما memory دارد، به general_no_business تبدیل می‌کنیم
+            if classification.category == "invalid_no_file" and (short_term_memory or long_term_memory):
+                classification.category = "general_no_business"
+            
             yield f"data: {json.dumps({'type': 'classification', 'category': classification.category, 'confidence': classification.confidence}, ensure_ascii=False)}\n\n"
             
             # Handle non-business questions

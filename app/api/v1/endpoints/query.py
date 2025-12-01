@@ -267,46 +267,53 @@ async def process_query_enhanced(
             )
             
             # ========== مسیر 1: invalid_no_file - متن نامعتبر بدون فایل ==========
+            # اما اگر context دارد، ممکن است follow-up باشد، پس به general_no_business می‌فرستیم
             if classification.category == "invalid_no_file":
-                logger.info("Handling invalid_no_file: asking for clarification")
-                
-                response_text = classification.direct_response or "متن شما قابل فهم نیست. لطفاً سوال خود را به صورت واضح و کامل بپرسید."
-                
-                # ذخیره در دیتابیس
-                user_msg = DBMessage(
-                    id=uuid.uuid4(),
-                    conversation_id=conversation.id,
-                    role=MessageRole.USER,
-                    content=request.query,
-                    created_at=datetime.utcnow()
-                )
-                db.add(user_msg)
-                
-                assistant_msg = DBMessage(
-                    id=uuid.uuid4(),
-                    conversation_id=conversation.id,
-                    role=MessageRole.ASSISTANT,
-                    content=response_text,
-                    created_at=datetime.utcnow()
-                )
-                db.add(assistant_msg)
-                
-                conversation.message_count += 2
-                user.increment_query_count()
-                await db.commit()
-                
-                processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-                
-                return QueryResponse(
-                    answer=response_text,
-                    sources=[],
-                    conversation_id=str(conversation.id),
-                    message_id=str(assistant_msg.id),
-                    tokens_used=0,
-                    processing_time_ms=processing_time,
-                    file_analysis=None,
-                    context_used=False
-                )
+                # اگر memory داریم، احتمالاً follow-up است
+                if short_term_memory or long_term_memory:
+                    logger.info("invalid_no_file but has memory context - treating as general_no_business")
+                    # به جای invalid، به عنوان general_no_business handle می‌کنیم
+                    classification.category = "general_no_business"
+                else:
+                    logger.info("Handling invalid_no_file: asking for clarification")
+                    
+                    response_text = classification.direct_response or "متن شما قابل فهم نیست. لطفاً سوال خود را به صورت واضح و کامل بپرسید."
+                    
+                    # ذخیره در دیتابیس
+                    user_msg = DBMessage(
+                        id=uuid.uuid4(),
+                        conversation_id=conversation.id,
+                        role=MessageRole.USER,
+                        content=request.query,
+                        created_at=datetime.utcnow()
+                    )
+                    db.add(user_msg)
+                    
+                    assistant_msg = DBMessage(
+                        id=uuid.uuid4(),
+                        conversation_id=conversation.id,
+                        role=MessageRole.ASSISTANT,
+                        content=response_text,
+                        created_at=datetime.utcnow()
+                    )
+                    db.add(assistant_msg)
+                    
+                    conversation.message_count += 2
+                    user.increment_query_count()
+                    await db.commit()
+                    
+                    processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                    
+                    return QueryResponse(
+                        answer=response_text,
+                        sources=[],
+                        conversation_id=str(conversation.id),
+                        message_id=str(assistant_msg.id),
+                        tokens_used=0,
+                        processing_time_ms=processing_time,
+                        file_analysis=None,
+                        context_used=False
+                    )
             
             # ========== مسیر 2: invalid_with_file - متن مبهم با فایل ==========
             elif classification.category == "invalid_with_file":

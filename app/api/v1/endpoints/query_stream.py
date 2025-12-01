@@ -285,7 +285,7 @@ async def stream_query_response(
         # Get chunks (non-streaming part)
         from app.services.embedding_service import get_embedding_service
         embedder = get_embedding_service()
-        query_embedding = await embedder.embed(request.query)
+        query_embedding = embedder.encode([request.query])[0]
         
         chunks = await pipeline._retrieve_chunks(
             query_embedding,

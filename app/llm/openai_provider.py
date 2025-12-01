@@ -122,6 +122,9 @@ class OpenAIProvider(BaseLLM):
             stream = await self.client.chat.completions.create(**params)
             
             async for chunk in stream:
+                # Skip chunks without choices (can happen at end of stream)
+                if not chunk.choices:
+                    continue
                 if chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
                     

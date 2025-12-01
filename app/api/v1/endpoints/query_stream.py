@@ -444,17 +444,23 @@ async def stream_query(
     user_id: str = Depends(get_current_user_id)
 ):
     """Process query with streaming response."""
-    # Get user
+    # Get user (same logic as non-streaming endpoint)
     result = await db.execute(
-        select(UserProfile).where(UserProfile.id == uuid.UUID(user_id))
+        select(UserProfile).where(UserProfile.external_user_id == user_id)
     )
     user = result.scalar_one_or_none()
     
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+        # Create new user if not exists
+        user = UserProfile(
+            id=uuid.uuid4(),
+            external_user_id=user_id,
+            username=f"user_{user_id[:8] if len(user_id) >= 8 else user_id}",
+            created_at=datetime.utcnow()
         )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
     
     return StreamingResponse(
         stream_query_response(request, db, user),

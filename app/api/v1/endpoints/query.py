@@ -226,10 +226,17 @@ async def process_query_enhanced(
             limit=10
         )
         
-        # ترکیب context برای classification
-        context_for_classification = ""
+        # ترکیب context برای classification (شامل هر دو long-term و short-term)
+        context_parts = []
         if long_term_memory:
-            context_for_classification = long_term_memory
+            context_parts.append(f"[خلاصه مکالمات قبلی]\n{long_term_memory}")
+        if short_term_memory:
+            memory_text = "\n".join([
+                f"{'کاربر' if m['role'] == 'user' else 'دستیار'}: {m['content']}"
+                for m in short_term_memory
+            ])
+            context_parts.append(f"[مکالمات اخیر]\n{memory_text}")
+        context_for_classification = "\n\n".join(context_parts) if context_parts else ""
         
         logger.info(
             "Memory retrieved",

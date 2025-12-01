@@ -4,31 +4,19 @@
 1. ✅ ایجاد فایل مرکزی prompts: `/srv/app/config/prompts.py`
 2. ✅ استفاده از prompts مرکزی در `query.py` برای `general_no_business`
 3. ✅ استفاده از prompts مرکزی در `query_stream.py` برای `general_no_business` و `invalid` cases
+4. ✅ Refactor کردن RAG pipeline برای استفاده از `RAGPrompts`
+   - ✅ `RAGPrompts.get_rag_system_prompt_fa()` برای فارسی
+   - ✅ `RAGPrompts.get_rag_system_prompt_en()` برای انگلیسی
+5. ✅ استفاده از `LLMConfig` در همه endpoints
+   - ✅ `query.py` - general questions
+   - ✅ `query_stream.py` - general questions
+   - ✅ `classifier.py` - classification
 
 ## 🔄 در انتظار:
-1. ⏳ Refactor کردن RAG pipeline برای استفاده از `RAGPrompts.get_rag_system_prompt_fa()`
-   - فایل: `/srv/app/rag/pipeline.py`
-   - خطوط: 516-569 (prompt فارسی)
-   - خطوط: 576-615 (prompt انگلیسی)
-   - دلیل: prompt خیلی بزرگ است و نیاز به تست دقیق دارد
-
-2. ⏳ استفاده از `LLMConfig` برای temperature و max_tokens
-   - فایل‌ها: `query.py`, `query_stream.py`, `classifier.py`
-   - مثال:
-     ```python
-     from app.config.prompts import LLMConfig
-     
-     # به جای:
-     temperature=0.7
-     max_tokens=1000
-     
-     # استفاده کن:
-     **LLMConfig.get_config_for_general_questions()
-     ```
-
-3. ⏳ استفاده از `ResponseTemplates` برای پاسخ‌های استاندارد
+1. ⏳ استفاده از `ResponseTemplates` برای پاسخ‌های استاندارد
    - مثال: زمانی که منبعی پیدا نشد
    - مثال: زمانی که نیاز به توضیح بیشتر است
+   - مثال: سوالات خارج از حوزه
 
 ## 📝 مزایای Refactoring کامل:
 
@@ -139,14 +127,14 @@ if not sources:
    - هر prompt باید docstring داشته باشد
    - مثال‌های استفاده را اضافه کنید
 
-## 📅 Timeline پیشنهادی:
+## 📅 Timeline:
 
 - **Week 1:** ✅ System prompts (انجام شد)
-- **Week 2:** RAG prompts refactoring
-- **Week 3:** LLM configs refactoring
-- **Week 4:** Response templates + testing
+- **Week 2:** ✅ RAG prompts refactoring (انجام شد)
+- **Week 3:** ✅ LLM configs refactoring (انجام شد)
+- **Week 4:** ⏳ Response templates + testing (در انتظار)
 
 ---
 
 **آخرین به‌روزرسانی:** 2025-12-01  
-**وضعیت:** در حال پیشرفت (30% کامل شده)
+**وضعیت:** تقریباً کامل (90% انجام شده) ✅

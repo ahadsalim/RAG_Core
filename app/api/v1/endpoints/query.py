@@ -358,13 +358,14 @@ async def process_query_enhanced(
                 import pytz
                 import jdatetime
                 
+                from app.config.prompts import LLMConfig as LLMConfigPresets
+                
                 llm_config = LLMConfig(
                     provider=LLMProviderEnum.OPENAI_COMPATIBLE,
                     model=settings.llm_model,
                     api_key=settings.llm_api_key,
                     base_url=settings.llm_base_url,
-                    temperature=0.7,
-                    max_tokens=1000,
+                    **LLMConfigPresets.get_config_for_general_questions()
                 )
                 llm = OpenAIProvider(llm_config)
                 

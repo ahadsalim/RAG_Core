@@ -33,14 +33,18 @@ class QueryClassifier:
     
     def __init__(self):
         """Initialize classifier with dedicated LLM"""
+        from app.config.prompts import LLMConfig as LLMConfigPresets
+        
         # استفاده از LLM جداگانه برای classification
+        config_presets = LLMConfigPresets.get_config_for_classification()
+        
         self.llm_config = LLMConfig(
             provider=LLMProvider.OPENAI_COMPATIBLE,
             model=settings.llm_classification_model or settings.llm_model,
             api_key=settings.llm_classification_api_key or settings.llm_api_key,
             base_url=settings.llm_classification_base_url or settings.llm_base_url,
-            temperature=settings.llm_classification_temperature or 0.2,
-            max_tokens=settings.llm_classification_max_tokens or 512,
+            temperature=settings.llm_classification_temperature or config_presets["temperature"],
+            max_tokens=settings.llm_classification_max_tokens or config_presets["max_tokens"],
         )
         self.llm = OpenAIProvider(self.llm_config)
         logger.info(f"QueryClassifier initialized with model: {self.llm_config.model}")

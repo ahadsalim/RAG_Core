@@ -131,8 +131,8 @@ class Conversation(BaseModel):
     max_tokens: Mapped[int] = mapped_column(Integer, default=4096)
     
     # Archive status (for cleanup tasks)
-    is_archived: Mapped[bool] = mapped_column(Boolean, default=False)
-    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    is_archived: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     # Timestamps
     last_message_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

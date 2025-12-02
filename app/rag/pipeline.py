@@ -13,7 +13,7 @@ import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.services.qdrant_service import QdrantService
-from app.services.local_embedding_service import get_local_embedding_service
+from app.services.embedding_service import get_embedding_service  # Unified embedding service
 from app.llm.openai_provider import OpenAIProvider
 from app.llm.base import Message, LLMConfig
 from app.llm.classifier import QueryClassifier
@@ -66,7 +66,6 @@ class RAGPipeline:
         """Initialize RAG pipeline components."""
         self.qdrant = QdrantService()
         # Use unified embedding service (auto-detects API vs local)
-        from app.services.embedding_service import get_embedding_service
         self.embedder = get_embedding_service()
         self.llm = OpenAIProvider()
         self.classifier = QueryClassifier()  # LLM برای دسته‌بندی سوالات

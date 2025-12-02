@@ -251,3 +251,46 @@ def cleanup_failed_tasks(self) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed tasks cleanup failed: {e}", task_id=self.request.id)
         return {"status": "error", "error": str(e)}
+
+
+@celery_app.task(
+    name="app.tasks.cleanup.cleanup_expired_temp_files",
+    bind=True
+)
+def cleanup_expired_temp_files(self) -> Dict[str, Any]:
+    """
+    Cleanup expired temporary files from MinIO/S3 storage.
+    Runs periodically via Celery Beat.
+    
+    Returns:
+        Cleanup statistics with deleted file count
+    """
+    try:
+        import asyncio
+        from app.services.storage_service import get_storage_service
+        
+        logger.info("Starting cleanup of expired temporary files", task_id=self.request.id)
+        
+        storage_service = get_storage_service()
+        
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        deleted_count = loop.run_until_complete(storage_service.cleanup_expired_files())
+        
+        logger.info(
+            "Temp files cleanup completed",
+            task_id=self.request.id,
+            deleted_count=deleted_count
+        )
+        
+        return {
+            "status": "success",
+            "deleted_count": deleted_count
+        }
+        
+    except Exception as e:
+        logger.error(f"Temp files cleanup failed: {e}", task_id=self.request.id)
+        return {"status": "error", "error": str(e)}

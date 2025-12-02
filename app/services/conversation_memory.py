@@ -244,7 +244,8 @@ class ConversationMemory:
                 Message(role="user", content=conversation_text)
             ]
             
-            summary = await self.llm.generate(messages)
+            response = await self.llm.generate(messages)
+            summary = response.content  # Extract content from LLMResponse
             
             logger.info(
                 "Conversation summarized",

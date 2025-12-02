@@ -23,6 +23,8 @@ __all__ = [
     'cleanup_old_cache',
     'cleanup_query_cache',
     'cleanup_old_conversations',
+    'cleanup_failed_tasks',
+    'cleanup_expired_temp_files',  # Consolidated from cleanup_files.py
     
     # User tasks
     'reset_user_daily_limit',

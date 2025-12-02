@@ -11,10 +11,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 import structlog
-import pytz
-import jdatetime
 
 from app.db.session import get_db
 from app.models.user import UserProfile, Conversation, Message as DBMessage, MessageRole
@@ -28,40 +25,20 @@ from app.llm.base import LLMConfig, LLMProvider as LLMProviderEnum, Message
 # Import models from main query endpoint
 from app.api.v1.endpoints.query import QueryRequest, FileAttachment
 
+# Import shared utilities
+from app.api.v1.endpoints.query_utils import (
+    get_current_shamsi_datetime,
+    get_or_create_user,
+    get_or_create_conversation as get_or_create_conv_util,
+    get_conversation_context,
+    build_llm_context,
+)
+
 logger = structlog.get_logger()
 router = APIRouter()
 
 
-async def get_or_create_conversation(
-    db: AsyncSession,
-    user_id: uuid.UUID,
-    conversation_id: Optional[str]
-) -> Conversation:
-    """Get existing or create new conversation."""
-    if conversation_id:
-        result = await db.execute(
-            select(Conversation).where(
-                Conversation.id == uuid.UUID(conversation_id),
-                Conversation.user_id == user_id
-            )
-        )
-        conversation = result.scalar_one_or_none()
-        if conversation:
-            return conversation
-    
-    # Create new conversation
-    conversation = Conversation(
-        id=uuid.uuid4(),
-        user_id=user_id,
-        title="گفتگوی جدید",
-        message_count=0,
-        total_tokens=0,
-        created_at=datetime.utcnow()
-    )
-    db.add(conversation)
-    await db.commit()
-    await db.refresh(conversation)
-    return conversation
+# get_or_create_conversation is now imported from query_utils
 
 
 async def analyze_files_for_query(
@@ -101,7 +78,7 @@ async def stream_query_response(
     
     try:
         # 1. Get or create conversation
-        conversation = await get_or_create_conversation(db, user.id, request.conversation_id)
+        conversation = await get_or_create_conv_util(db, user.id, request.conversation_id)
         
         # Send conversation_id first
         yield f"data: {json.dumps({'type': 'conversation_id', 'conversation_id': str(conversation.id)}, ensure_ascii=False)}\n\n"
@@ -114,31 +91,15 @@ async def stream_query_response(
             if file_analysis:
                 yield f"data: {json.dumps({'type': 'file_analysis', 'content': file_analysis}, ensure_ascii=False)}\n\n"
         
-        # 3. Get conversation memory
-        memory_service = get_conversation_memory()
-        long_term_memory = await memory_service.get_long_term_memory(
+        # 3. Get conversation memory - using shared utility
+        long_term_memory, short_term_memory, context_for_classification = await get_conversation_context(
             db, str(user.id), str(conversation.id)
-        )
-        short_term_memory = await memory_service.get_short_term_memory(
-            db, str(conversation.id), limit=10
         )
         
         # 4. Classify query
         if settings.enable_query_classification:
             from app.llm.classifier import QueryClassifier
             classifier = QueryClassifier()
-            
-            # ترکیب context برای classification (شامل هر دو long-term و short-term)
-            context_parts = []
-            if long_term_memory:
-                context_parts.append(f"[خلاصه مکالمات قبلی]\n{long_term_memory}")
-            if short_term_memory:
-                memory_text = "\n".join([
-                    f"{'کاربر' if m['role'] == 'user' else 'دستیار'}: {m['content']}"
-                    for m in short_term_memory
-                ])
-                context_parts.append(f"[مکالمات اخیر]\n{memory_text}")
-            context_for_classification = "\n\n".join(context_parts) if context_parts else ""
             
             classification = await classifier.classify(
                 query=request.query,
@@ -167,12 +128,8 @@ async def stream_query_response(
                 )
                 llm = OpenAIProvider(llm_config)
                 
-                # Get current date/time in Shamsi
-                tehran_tz = pytz.timezone('Asia/Tehran')
-                now = datetime.now(tehran_tz)
-                jalali_now = jdatetime.datetime.fromgregorian(datetime=now)
-                current_date_shamsi = jalali_now.strftime('%Y/%m/%d')
-                current_time_fa = now.strftime('%H:%M')
+                # Get current date/time in Shamsi - using shared utility
+                current_date_shamsi, current_time_fa = get_current_shamsi_datetime()
                 
                 from app.config.prompts import SystemPrompts
                 
@@ -264,21 +221,13 @@ async def stream_query_response(
         # 5. Business questions - use RAG with streaming
         yield f"data: {json.dumps({'type': 'status', 'message': 'در حال جستجو در منابع...'}, ensure_ascii=False)}\n\n"
         
-        # Build context
-        full_context_parts = []
-        if long_term_memory:
-            full_context_parts.append(f"[خلاصه مکالمات قبلی]\n{long_term_memory}\n")
-        if short_term_memory:
-            memory_text = "\n".join([
-                f"{'کاربر' if m['role'] == 'user' else 'سیستم'}: {m['content']}"
-                for m in short_term_memory
-            ])
-            full_context_parts.append(f"[مکالمات اخیر]\n{memory_text}\n")
-        if file_analysis:
-            full_context_parts.append(f"[تحلیل فایل‌ها]\n{file_analysis}\n")
-        full_context_parts.append(f"[سوال فعلی]\n{request.query}")
-        
-        llm_context = "\n".join(full_context_parts)
+        # Build context - using shared utility
+        llm_context = build_llm_context(
+            request.query,
+            long_term_memory,
+            short_term_memory,
+            file_analysis
+        )
         
         # Use RAG pipeline for retrieval
         from app.rag.pipeline import RAGPipeline, RAGQuery
@@ -329,12 +278,8 @@ async def stream_query_response(
         
         context = "\n\n".join(context_parts)
         
-        # Build messages for streaming
-        tehran_tz = pytz.timezone('Asia/Tehran')
-        now = datetime.now(tehran_tz)
-        jalali_now = jdatetime.datetime.fromgregorian(datetime=now)
-        current_date_shamsi = jalali_now.strftime('%Y/%m/%d')
-        current_time_fa = now.strftime('%H:%M')
+        # Build messages for streaming - using shared utility for date/time
+        current_date_shamsi, current_time_fa = get_current_shamsi_datetime()
         
         system_prompt = f"""شما یک دستیار حقوقی و مشاور کسب و کار هستید.
 
@@ -459,23 +404,8 @@ async def stream_query(
     user_id: str = Depends(get_current_user_id)
 ):
     """Process query with streaming response."""
-    # Get user (same logic as non-streaming endpoint)
-    result = await db.execute(
-        select(UserProfile).where(UserProfile.external_user_id == user_id)
-    )
-    user = result.scalar_one_or_none()
-    
-    if not user:
-        # Create new user if not exists
-        user = UserProfile(
-            id=uuid.uuid4(),
-            external_user_id=user_id,
-            username=f"user_{user_id[:8] if len(user_id) >= 8 else user_id}",
-            created_at=datetime.utcnow()
-        )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
+    # Get user - using shared utility
+    user = await get_or_create_user(db, user_id)
     
     return StreamingResponse(
         stream_query_response(request, db, user),

@@ -177,60 +177,6 @@ class OpenAIProvider(BaseLLM):
             return len(text) // 4
 
 
-class OpenAIEmbedding:
-    """OpenAI embedding service for RAG."""
-    
-    def __init__(self, model: str = None):
-        """Initialize embedding service."""
-        self.model = model or settings.openai_embedding_model
-        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
-        
-        # Get embedding dimension
-        self.dimension = self._get_model_dimension(self.model)
-    
-    def _get_model_dimension(self, model: str) -> int:
-        """Get embedding dimension for model."""
-        dimensions = {
-            "text-embedding-3-small": 1536,
-            "text-embedding-3-large": 3072,
-            "text-embedding-ada-002": 1536,
-        }
-        return dimensions.get(model, 1536)
-    
-    async def embed_text(self, text: str) -> List[float]:
-        """Embed a single text."""
-        try:
-            response = await self.client.embeddings.create(
-                model=self.model,
-                input=text
-            )
-            return response.data[0].embedding
-        except Exception as e:
-            logger.error(f"Embedding failed: {e}")
-            raise
-    
-    async def embed_batch(
-        self,
-        texts: List[str],
-        batch_size: int = 100
-    ) -> List[List[float]]:
-        """Embed multiple texts in batches."""
-        embeddings = []
-        
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            
-            try:
-                response = await self.client.embeddings.create(
-                    model=self.model,
-                    input=batch
-                )
-                
-                for item in response.data:
-                    embeddings.append(item.embedding)
-                    
-            except Exception as e:
-                logger.error(f"Batch embedding failed: {e}")
-                raise
-        
-        return embeddings
+# NOTE: OpenAIEmbedding class has been removed.
+# Use app.services.embedding_service.EmbeddingService instead for all embedding needs.
+# The unified EmbeddingService supports both API-based and local embeddings automatically.

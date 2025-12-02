@@ -82,7 +82,7 @@ celery_app.conf.update(
         },
         # Cleanup expired temporary files every hour
         'cleanup-temp-files': {
-            'task': 'cleanup_expired_temp_files',
+            'task': 'app.tasks.cleanup.cleanup_expired_temp_files',
             'schedule': crontab(hour='*', minute=30),  # Every hour at :30
         },
     },

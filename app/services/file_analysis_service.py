@@ -30,6 +30,56 @@ class FileAnalysisService:
         self.llm = OpenAIProvider(self.llm_config)
         logger.info("FileAnalysisService initialized")
     
+    async def analyze_file(
+        self,
+        file_url: str,
+        filename: str,
+        file_type: str,
+        user_query: str,
+        language: str = "fa"
+    ) -> str:
+        """
+        تحلیل یک فایل منفرد با LLM
+        
+        Args:
+            file_url: آدرس فایل در MinIO
+            filename: نام فایل
+            file_type: نوع فایل (MIME type)
+            user_query: سوال کاربر
+            language: زبان
+            
+        Returns:
+            تحلیل فایل
+        """
+        try:
+            from app.services.storage_service import get_storage_service
+            from app.services.file_processing_service import get_file_processing_service
+            
+            # Download file
+            storage_service = get_storage_service()
+            file_data = await storage_service.download_temp_file(file_url)
+            
+            # Extract text
+            file_processor = get_file_processing_service()
+            processing_result = await file_processor.process_file(
+                file_data, filename, file_type
+            )
+            
+            # Prepare content
+            file_content = [{
+                'filename': filename,
+                'file_type': file_type,
+                'content': processing_result.get('text', ''),
+                'is_image': file_type.startswith('image/')
+            }]
+            
+            # Analyze with LLM
+            return await self.analyze_files(file_content, user_query, language)
+            
+        except Exception as e:
+            logger.error(f"Failed to analyze file {filename}: {e}")
+            return f"خطا در تحلیل فایل {filename}"
+    
     async def analyze_files(
         self,
         files_content: List[Dict[str, Any]],
@@ -71,7 +121,8 @@ class FileAnalysisService:
                 )
             ]
             
-            analysis = await self.llm.generate(messages)
+            response = await self.llm.generate(messages)
+            analysis = response.content  # Extract content from LLMResponse
             
             logger.info(
                 "Files analyzed",
@@ -140,7 +191,8 @@ class FileAnalysisService:
                 )
             ]
             
-            analysis = await self.llm.generate(messages)
+            response = await self.llm.generate(messages)
+            analysis = response.content  # Extract content from LLMResponse
             
             logger.info(
                 "Image analyzed with vision",

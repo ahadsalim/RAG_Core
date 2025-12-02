@@ -6,26 +6,30 @@ Query Processing API Endpoints - Enhanced Version
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import uuid
-import asyncio
-import json
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 import structlog
 
 from app.db.session import get_db
 from app.rag.pipeline import RAGPipeline, RAGQuery
 from app.models.user import UserProfile, Conversation, Message as DBMessage, MessageRole
 from app.core.security import get_current_user_id
-from app.core.dependencies import get_redis_client
 from app.config.settings import settings
-from app.services.file_processing_service import get_file_processing_service
-from app.services.storage_service import get_storage_service
-from app.services.file_analysis_service import get_file_analysis_service
 from app.services.conversation_memory import get_conversation_memory
+
+# Import shared utilities
+from app.api.v1.endpoints.query_utils import (
+    get_current_shamsi_datetime,
+    get_or_create_user,
+    get_or_create_conversation,
+    get_conversation_context,
+    build_llm_context,
+    process_file_attachments,
+    save_conversation_messages,
+    classify_query_with_context,
+)
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -107,20 +111,7 @@ async def process_query_enhanced(
     
     try:
         # ========== مرحله 1: احراز هویت و بررسی محدودیت‌ها ==========
-        stmt = select(UserProfile).where(UserProfile.external_user_id == user_id)
-        result = await db.execute(stmt)
-        user = result.scalar_one_or_none()
-        
-        if not user:
-            user = UserProfile(
-                id=uuid.uuid4(),
-                external_user_id=user_id,
-                username=f"user_{user_id[:8]}",
-                created_at=datetime.utcnow()
-            )
-            db.add(user)
-            await db.commit()
-            await db.refresh(user)
+        user = await get_or_create_user(db, user_id)
         
         if not user.can_make_query():
             raise HTTPException(
@@ -129,119 +120,20 @@ async def process_query_enhanced(
             )
         
         # ========== مرحله 2: مدیریت Conversation ==========
-        conversation = None
-        if request.conversation_id:
-            conversation = await db.get(Conversation, request.conversation_id)
-            if conversation and conversation.user_id != user.id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access denied to this conversation"
-                )
-        
-        if not conversation:
-            conversation = Conversation(
-                id=uuid.uuid4(),
-                user_id=user.id,
-                title=request.query[:100],
-                message_count=0,
-                total_tokens=0,
-                created_at=datetime.utcnow()
-            )
-            db.add(conversation)
-            await db.flush()
+        conversation = await get_or_create_conversation(
+            db, user.id, request.conversation_id, request.query[:100]
+        )
         
         # ========== مرحله 3: تحلیل فایل‌های ضمیمه (اگر وجود دارد) ==========
-        file_analysis = None
-        file_context = ""
-        
-        if request.file_attachments:
-            logger.info(
-                f"Processing {len(request.file_attachments)} file attachments",
-                user_id=user_id,
-                conversation_id=str(conversation.id)
-            )
-            
-            # دانلود و استخراج محتوای فایل‌ها
-            file_processor = get_file_processing_service()
-            storage_service = get_storage_service()
-            file_analysis_service = get_file_analysis_service()
-            
-            files_content = []
-            for attachment in request.file_attachments:
-                try:
-                    # دانلود از MinIO
-                    file_data = await storage_service.download_temp_file(
-                        attachment.minio_url
-                    )
-                    
-                    # استخراج متن (OCR برای تصویر، text extraction برای PDF)
-                    processing_result = await file_processor.process_file(
-                        file_data,
-                        attachment.filename,
-                        attachment.file_type
-                    )
-                    
-                    files_content.append({
-                        'filename': attachment.filename,
-                        'file_type': attachment.file_type,
-                        'content': processing_result.get('text', ''),
-                        'is_image': attachment.file_type.startswith('image/')
-                    })
-                    
-                except Exception as e:
-                    logger.error(
-                        f"Failed to process file: {e}",
-                        filename=attachment.filename
-                    )
-                    continue
-            
-            # تحلیل فایل‌ها با LLM
-            if files_content:
-                file_analysis = await file_analysis_service.analyze_files(
-                    files_content,
-                    request.query,
-                    request.language
-                )
-                
-                logger.info(
-                    "Files analyzed with LLM",
-                    file_count=len(files_content),
-                    analysis_length=len(file_analysis)
-                )
+        file_analysis, files_content = await process_file_attachments(
+            request.file_attachments,
+            request.query,
+            request.language
+        )
         
         # ========== مرحله 4: دریافت حافظه مکالمات ==========
-        memory_service = get_conversation_memory()
-        
-        # حافظه بلندمدت (خلاصه مکالمات قبلی)
-        long_term_memory = await memory_service.get_long_term_memory(
-            db,
-            str(user.id),
-            str(conversation.id)
-        )
-        
-        # حافظه کوتاه‌مدت (پیام‌های اخیر)
-        short_term_memory = await memory_service.get_short_term_memory(
-            db,
-            str(conversation.id),
-            limit=10
-        )
-        
-        # ترکیب context برای classification (شامل هر دو long-term و short-term)
-        context_parts = []
-        if long_term_memory:
-            context_parts.append(f"[خلاصه مکالمات قبلی]\n{long_term_memory}")
-        if short_term_memory:
-            memory_text = "\n".join([
-                f"{'کاربر' if m['role'] == 'user' else 'دستیار'}: {m['content']}"
-                for m in short_term_memory
-            ])
-            context_parts.append(f"[مکالمات اخیر]\n{memory_text}")
-        context_for_classification = "\n\n".join(context_parts) if context_parts else ""
-        
-        logger.info(
-            "Memory retrieved",
-            has_long_term=bool(long_term_memory),
-            short_term_messages=len(short_term_memory)
+        long_term_memory, short_term_memory, context_for_classification = await get_conversation_context(
+            db, str(user.id), str(conversation.id)
         )
         
         # ========== مرحله 5: کلاسیفیکیشن دقیق سوال ==========
@@ -369,10 +261,7 @@ async def process_query_enhanced(
                 # استفاده از LLM به صورت عمومی (بدون RAG)
                 from app.llm.openai_provider import OpenAIProvider
                 from app.llm.base import LLMConfig, LLMProvider as LLMProviderEnum, Message
-                import pytz
-                import jdatetime
-                
-                from app.config.prompts import LLMConfig as LLMConfigPresets
+                from app.config.prompts import LLMConfig as LLMConfigPresets, SystemPrompts
                 
                 llm_config = LLMConfig(
                     provider=LLMProviderEnum.OPENAI_COMPATIBLE,
@@ -384,14 +273,7 @@ async def process_query_enhanced(
                 llm = OpenAIProvider(llm_config)
                 
                 # دریافت تاریخ و ساعت فعلی (شمسی)
-                tehran_tz = pytz.timezone('Asia/Tehran')
-                now = datetime.now(tehran_tz)
-                jalali_now = jdatetime.datetime.fromgregorian(datetime=now)
-                current_date_shamsi = jalali_now.strftime('%Y/%m/%d')
-                current_time_fa = now.strftime('%H:%M')
-                
-                # ساخت پیام‌ها با تاریخ و ساعت شمسی
-                from app.config.prompts import SystemPrompts, LLMConfig
+                current_date_shamsi, current_time_fa = get_current_shamsi_datetime()
                 
                 system_message = SystemPrompts.get_system_identity(
                     current_date_shamsi=current_date_shamsi,
@@ -477,29 +359,13 @@ async def process_query_enhanced(
         # Query برای جستجو (فقط سوال اصلی)
         search_query = request.query
         
-        # Context برای LLM (شامل همه چیز)
-        full_context_parts = []
-        
-        # 1. حافظه بلندمدت
-        if long_term_memory:
-            full_context_parts.append(f"[خلاصه مکالمات قبلی]\n{long_term_memory}\n")
-        
-        # 2. حافظه کوتاه‌مدت (پیام‌های اخیر)
-        if short_term_memory:
-            memory_text = "\n".join([
-                f"{'کاربر' if m['role'] == 'user' else 'سیستم'}: {m['content']}"
-                for m in short_term_memory
-            ])
-            full_context_parts.append(f"[مکالمات اخیر]\n{memory_text}\n")
-        
-        # 3. تحلیل فایل
-        if file_analysis:
-            full_context_parts.append(f"[تحلیل فایل‌های ضمیمه]\n{file_analysis}\n")
-        
-        # 4. سوال فعلی
-        full_context_parts.append(f"[سوال فعلی]\n{request.query}")
-        
-        llm_context = "\n".join(full_context_parts)
+        # Context برای LLM (شامل همه چیز) - استفاده از utility مشترک
+        llm_context = build_llm_context(
+            request.query,
+            long_term_memory,
+            short_term_memory,
+            file_analysis
+        )
         
         logger.info(
             "RAG query prepared",

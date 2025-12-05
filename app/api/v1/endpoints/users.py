@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 import structlog
 
 from app.db.session import get_db
-from app.models.user import UserProfile, Conversation, Message, UserTier
+from app.models.user import UserProfile, Conversation, Message
 from app.core.security import get_current_user_id
 
 logger = structlog.get_logger()

@@ -15,12 +15,8 @@ import enum
 from app.models.base import BaseModel
 
 
-class UserTier(enum.Enum):
-    """User subscription tiers."""
-    FREE = "free"
-    BASIC = "basic"
-    PREMIUM = "premium"
-    ENTERPRISE = "enterprise"
+# NOTE: UserTier removed - subscription management is handled by Users system
+# RAG Core only stores user reference and usage statistics
 
 
 class UserProfile(BaseModel):
@@ -41,15 +37,8 @@ class UserProfile(BaseModel):
     email: Mapped[Optional[str]] = mapped_column(String(255))
     full_name: Mapped[Optional[str]] = mapped_column(String(255))
     
-    # Subscription and limits
-    tier: Mapped[UserTier] = mapped_column(
-        SQLEnum(UserTier),
-        default=UserTier.FREE,
-        nullable=False
-    )
-    
-    daily_query_limit: Mapped[int] = mapped_column(Integer, default=50)
-    daily_query_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Usage statistics (for analytics only, not for limit enforcement)
+    # NOTE: Subscription limits are enforced by Users system
     total_query_count: Mapped[int] = mapped_column(Integer, default=0)
     
     # User preferences
@@ -84,18 +73,10 @@ class UserProfile(BaseModel):
     __table_args__ = (
         Index("idx_user_external_id", "external_user_id"),
         Index("idx_user_email", "email"),
-        Index("idx_user_tier", "tier"),
     )
     
-    def can_make_query(self) -> bool:
-        """Check if user can make another query today."""
-        if self.tier == UserTier.ENTERPRISE:
-            return True
-        return self.daily_query_count < self.daily_query_limit
-    
     def increment_query_count(self):
-        """Increment query counters."""
-        self.daily_query_count += 1
+        """Increment query counter for statistics."""
         self.total_query_count += 1
         self.last_active_at = datetime.utcnow()
 

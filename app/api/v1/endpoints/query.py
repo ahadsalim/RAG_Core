@@ -110,14 +110,9 @@ async def process_query_enhanced(
     start_time = datetime.utcnow()
     
     try:
-        # ========== مرحله 1: احراز هویت و بررسی محدودیت‌ها ==========
+        # ========== مرحله 1: احراز هویت ==========
+        # NOTE: کنترل محدودیت اشتراک سمت سیستم کاربران انجام می‌شود
         user = await get_or_create_user(db, user_id)
-        
-        if not user.can_make_query():
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Daily query limit exceeded"
-            )
         
         # ========== مرحله 2: مدیریت Conversation ==========
         conversation = await get_or_create_conversation(

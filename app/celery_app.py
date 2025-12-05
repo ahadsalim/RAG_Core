@@ -54,12 +54,8 @@ celery_app.conf.update(
     },
     
     # Beat schedule for periodic tasks
+    # NOTE: User limit reset removed - handled by Users system
     beat_schedule={
-        # Reset daily user limits at midnight
-        'reset-daily-limits': {
-            'task': 'app.tasks.user.reset_all_daily_limits',
-            'schedule': crontab(hour=0, minute=0),  # Every day at midnight
-        },
         # Cleanup old cache entries every 6 hours
         'cleanup-cache': {
             'task': 'app.tasks.cleanup.cleanup_old_cache',

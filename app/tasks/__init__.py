@@ -26,8 +26,6 @@ __all__ = [
     'cleanup_failed_tasks',
     'cleanup_expired_temp_files',  # Consolidated from cleanup_files.py
     
-    # User tasks
-    'reset_user_daily_limit',
-    'reset_all_daily_limits',
+    # User tasks (statistics only - limits handled by Users system)
     'update_user_statistics',
 ]

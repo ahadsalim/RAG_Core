@@ -1,6 +1,9 @@
 """
 User Tasks
-Async tasks for user management and statistics
+Async tasks for user statistics (analytics only)
+
+NOTE: Subscription and limit management is handled by Users system.
+RAG Core only tracks usage statistics for analytics purposes.
 """
 
 from typing import Dict, Any
@@ -12,119 +15,8 @@ from app.celery_app import celery_app
 logger = structlog.get_logger()
 
 
-@celery_app.task(
-    name="app.tasks.user.reset_user_daily_limit",
-    bind=True
-)
-def reset_user_daily_limit(self, user_id: str) -> Dict[str, Any]:
-    """
-    Reset a specific user's daily query limit.
-    
-    Args:
-        user_id: User ID
-        
-    Returns:
-        Reset result
-    """
-    try:
-        import asyncio
-        from app.db.session import get_session
-        from app.models.user import UserProfile
-        from app.core.dependencies import get_redis_client
-        
-        async def reset():
-            async with get_session() as session:
-                user = await session.get(UserProfile, user_id)
-                if user:
-                    user.daily_query_count = 0
-                    user.last_reset_at = datetime.utcnow()
-                    await session.commit()
-                    
-                    # Also clear Redis cache
-                    redis = await get_redis_client()
-                    reset_key = f"user:daily_reset:{user_id}:{datetime.utcnow().date()}"
-                    await redis.setex(reset_key, 86400, "1")
-                    
-                    return {"status": "success", "user_id": user_id}
-                else:
-                    return {"status": "not_found", "user_id": user_id}
-        
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(reset())
-        
-        logger.info(
-            "User daily limit reset",
-            task_id=self.request.id,
-            user_id=user_id
-        )
-        
-        return result
-        
-    except Exception as e:
-        logger.error(
-            f"Failed to reset user limit: {e}",
-            task_id=self.request.id,
-            user_id=user_id
-        )
-        return {"status": "error", "error": str(e)}
-
-
-@celery_app.task(
-    name="app.tasks.user.reset_all_daily_limits",
-    bind=True
-)
-def reset_all_daily_limits(self) -> Dict[str, Any]:
-    """
-    Reset daily query limits for all users.
-    Runs daily at midnight via Celery Beat.
-    
-    Returns:
-        Reset statistics
-    """
-    try:
-        import asyncio
-        from app.db.session import get_session
-        from app.models.user import UserProfile
-        from sqlalchemy import update
-        
-        async def reset():
-            async with get_session() as session:
-                # Reset all users
-                stmt = (
-                    update(UserProfile)
-                    .values(
-                        daily_query_count=0,
-                        last_reset_at=datetime.utcnow()
-                    )
-                )
-                
-                result = await session.execute(stmt)
-                await session.commit()
-                
-                return {"reset_count": result.rowcount}
-        
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(reset())
-        
-        logger.info(
-            "All user daily limits reset",
-            task_id=self.request.id,
-            **result
-        )
-        
-        return {"status": "success", **result}
-        
-    except Exception as e:
-        logger.error(f"Failed to reset all limits: {e}", task_id=self.request.id)
-        return {"status": "error", "error": str(e)}
+# NOTE: reset_user_daily_limit and reset_all_daily_limits tasks removed
+# Subscription limits are now managed by Users system
 
 
 @celery_app.task(

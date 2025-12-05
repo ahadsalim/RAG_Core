@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
-Reset Qdrant Collection for Embedding Model Change
-===================================================
-This script deletes and recreates the Qdrant collection when the embedding
-model changes (e.g., from e5-base (768d) to e5-large (1024d)).
+Reset Qdrant Collection - Unified Script
+=========================================
+This script manages the Qdrant collection for the RAG Core system.
+Use this when:
+- Changing embedding model dimensions
+- Clearing all vectors for fresh resync
+- Troubleshooting Qdrant issues
 
 Usage:
-    python scripts/reset_qdrant_collection.py
+    python scripts/reset_qdrant_collection.py           # Interactive mode
+    python scripts/reset_qdrant_collection.py --force   # Non-interactive (use with caution)
+    python scripts/reset_qdrant_collection.py --info    # Show collection info only
 
 IMPORTANT: This will delete ALL vectors in Qdrant!
 Make sure the ingest system is ready to re-sync all data.
@@ -26,8 +31,82 @@ import structlog
 logger = structlog.get_logger()
 
 
+def show_info():
+    """Show current collection info."""
+    print("=" * 70)
+    print("📊 Qdrant Collection Info")
+    print("=" * 70)
+    print()
+    print(f"   Collection: {settings.qdrant_collection}")
+    print(f"   Host: {settings.qdrant_host}:{settings.qdrant_port}")
+    print()
+    
+    try:
+        qdrant = QdrantService()
+        info = qdrant.client.get_collection(settings.qdrant_collection)
+        print(f"   Points: {info.points_count}")
+        print(f"   Vectors: {info.vectors_count}")
+        print(f"   Status: {info.status}")
+        print()
+        print("   Vector Configs:")
+        for name, config in info.config.params.vectors.items():
+            print(f"      {name}: {config.size}d")
+    except Exception as e:
+        print(f"   Collection not found: {e}")
+    print()
+
+
+def create_collection(qdrant):
+    """Create collection with multi-dimensional support."""
+    from qdrant_client.models import Distance, VectorParams, OptimizersConfigDiff
+    
+    qdrant.client.create_collection(
+        collection_name=settings.qdrant_collection,
+        vectors_config={
+            "default": VectorParams(
+                size=3072,  # For large embedding models
+                distance=Distance.COSINE,
+            ),
+            "small": VectorParams(
+                size=512,  # Smaller models
+                distance=Distance.COSINE,
+            ),
+            "medium": VectorParams(
+                size=768,  # BERT-based models, e5-base
+                distance=Distance.COSINE,
+            ),
+            "large": VectorParams(
+                size=1024,  # e5-large, bge-m3
+                distance=Distance.COSINE,
+            ),
+            "xlarge": VectorParams(
+                size=1536,  # OpenAI ada-002, text-embedding-3-small
+                distance=Distance.COSINE,
+            ),
+        },
+        optimizers_config=OptimizersConfigDiff(
+            indexing_threshold=20000,
+            memmap_threshold=50000,
+        ),
+    )
+
+
 def main():
     """Delete and recreate Qdrant collection."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Reset Qdrant Collection')
+    parser.add_argument('--force', '-f', action='store_true', 
+                        help='Skip confirmation prompt')
+    parser.add_argument('--info', '-i', action='store_true',
+                        help='Show collection info only')
+    args = parser.parse_args()
+    
+    # Info only mode
+    if args.info:
+        show_info()
+        return
+    
     print("=" * 70)
     print("Qdrant Collection Reset Script")
     print("=" * 70)
@@ -37,11 +116,14 @@ def main():
     print(f"   Host: {settings.qdrant_host}:{settings.qdrant_port}")
     print()
     
-    # Confirm action
-    response = input("Are you sure you want to continue? (yes/no): ")
-    if response.lower() not in ['yes', 'y']:
-        print("❌ Operation cancelled.")
-        return
+    # Confirm action unless --force
+    if not args.force:
+        response = input("Are you sure you want to continue? (yes/no): ")
+        if response.lower() not in ['yes', 'y']:
+            print("❌ Operation cancelled.")
+            return
+    else:
+        print("🚨 Force mode enabled - skipping confirmation")
     
     print()
     print("Initializing Qdrant service...")
@@ -64,46 +146,15 @@ def main():
         print("✅ Collection deleted successfully!")
         
         print()
-        print("🔨 Creating new collection with updated configuration...")
+        print("🛠️  Creating new collection with multi-dimensional support...")
         print("   Supported dimensions:")
         print("      - small: 512")
         print("      - medium: 768")
-        print("      - large: 1024  ← e5-large")
+        print("      - large: 1024  ← e5-large (default)")
         print("      - xlarge: 1536")
         print("      - default: 3072")
         
-        # Create collection with updated config
-        from qdrant_client.models import Distance, VectorParams, OptimizersConfigDiff
-        
-        qdrant.client.create_collection(
-            collection_name=settings.qdrant_collection,
-            vectors_config={
-                "default": VectorParams(
-                    size=3072,  # For large embedding models (e.g., text-embedding-3-large)
-                    distance=Distance.COSINE,
-                ),
-                "small": VectorParams(
-                    size=512,  # Smaller models
-                    distance=Distance.COSINE,
-                ),
-                "medium": VectorParams(
-                    size=768,  # BERT-based models, e5-base
-                    distance=Distance.COSINE,
-                ),
-                "large": VectorParams(
-                    size=1024,  # e5-large, bge-m3
-                    distance=Distance.COSINE,
-                ),
-                "xlarge": VectorParams(
-                    size=1536,  # OpenAI ada-002, text-embedding-3-small
-                    distance=Distance.COSINE,
-                ),
-            },
-            optimizers_config=OptimizersConfigDiff(
-                indexing_threshold=20000,
-                memmap_threshold=50000,
-            ),
-        )
+        create_collection(qdrant)
         print("✅ Collection created successfully!")
         
         print()

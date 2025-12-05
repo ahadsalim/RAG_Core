@@ -1,7 +1,9 @@
 #!/bin/bash
 
-# Core RAG System - Management Script
-# اسکریپت یکپارچه مدیریت سیستم
+# ==============================================================================
+# Core RAG System - Configuration Management Script
+# Version: 2.0.0
+# ==============================================================================
 
 set -e
 
@@ -10,18 +12,20 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$PROJECT_ROOT/.env"
+COMPOSE_FILE="$SCRIPT_DIR/docker/docker-compose.yml"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 # Helper functions
-print_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
-print_success() { echo -e "${GREEN}✅ $1${NC}"; }
-print_error() { echo -e "${RED}❌ $1${NC}"; }
-print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+print_info() { echo -e "${BLUE}[ℹ]${NC} $1"; }
+print_success() { echo -e "${GREEN}[✓]${NC} $1"; }
+print_error() { echo -e "${RED}[✗]${NC} $1"; }
+print_warning() { echo -e "${YELLOW}[⚠]${NC} $1"; }
 
 get_env() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | sed -E 's/^'"$1"'="?(.*)"?$/\1/' | tail -n1; }
 set_env() { 

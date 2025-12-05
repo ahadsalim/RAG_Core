@@ -7,28 +7,28 @@ services:
     container_name: core-api
     ports:
       - "7001:7001"
-    environment:
-      - ENVIRONMENT=${ENVIRONMENT}
-      - DEBUG=${DEBUG}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - DATABASE_URL=${DATABASE_URL}
-      - INGEST_DATABASE_URL=${INGEST_DATABASE_URL}
-      - QDRANT_HOST=${QDRANT_HOST}
-      - QDRANT_PORT=${QDRANT_PORT}
-      - REDIS_URL=${REDIS_URL}
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
-      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+    env_file:
+      - ../../.env
     depends_on:
-      - postgres-core
-      - redis-core
-      - qdrant
+      postgres-core:
+        condition: service_healthy
+      redis-core:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
     volumes:
       - ../../:/app
       - /app/data  # Exclude data directory to avoid permission issues
     command: uvicorn app.main:app --host 0.0.0.0 --port 7001 --reload
     networks:
       - core-network
-      # Note: ingest database is external, no need for ingest-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
 
   # PostgreSQL for Core
   postgres-core:
@@ -95,22 +95,15 @@ services:
       context: ../..
       dockerfile: deployment/docker/Dockerfile
     container_name: celery-worker
-    environment:
-      - ENVIRONMENT=${ENVIRONMENT}
-      - DATABASE_URL=${DATABASE_URL}
-      - INGEST_DATABASE_URL=${INGEST_DATABASE_URL}
-      - QDRANT_HOST=${QDRANT_HOST}
-      - QDRANT_PORT=${QDRANT_PORT}
-      - REDIS_URL=${REDIS_URL}
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
-      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
-      - USERS_API_URL=${USERS_API_URL}
-      - USERS_API_KEY=${USERS_API_KEY}
+    env_file:
+      - ../../.env
     depends_on:
-      - redis-core
-      - postgres-core
-      - qdrant
+      redis-core:
+        condition: service_healthy
+      postgres-core:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
     volumes:
       - ../../:/app
     command: celery -A app.celery_app worker --loglevel=info --concurrency=4 --queues=sync,notifications,cleanup,user
@@ -124,20 +117,13 @@ services:
       context: ../..
       dockerfile: deployment/docker/Dockerfile
     container_name: celery-beat
-    environment:
-      - ENVIRONMENT=${ENVIRONMENT}
-      - DATABASE_URL=${DATABASE_URL}
-      - INGEST_DATABASE_URL=${INGEST_DATABASE_URL}
-      - QDRANT_HOST=${QDRANT_HOST}
-      - QDRANT_PORT=${QDRANT_PORT}
-      - REDIS_URL=${REDIS_URL}
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
-      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+    env_file:
+      - ../../.env
     depends_on:
-      - redis-core
-      - postgres-core
-      - qdrant
+      redis-core:
+        condition: service_healthy
+      postgres-core:
+        condition: service_healthy
     volumes:
       - ../../:/app
     command: celery -A app.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
@@ -152,13 +138,17 @@ services:
     container_name: flower
     ports:
       - "5555:5555"
+    env_file:
+      - ../../.env
     environment:
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
       - FLOWER_PORT=5555
+      - FLOWER_BASIC_AUTH=admin:${FLOWER_PASSWORD:-admin123}
     depends_on:
-      - redis-core
+      redis-core:
+        condition: service_healthy
     networks:
       - core-network
+    restart: unless-stopped
 
   # Nginx Proxy Manager
   nginx-proxy-manager:

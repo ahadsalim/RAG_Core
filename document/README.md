@@ -1,7 +1,7 @@
 # 📚 مستندات سیستم RAG Core
 
 **نسخه:** 2.0.0  
-**آخرین به‌روزرسانی:** 2025-11-29
+**آخرین به‌روزرسانی:** 2025-12-05
 
 ---
 
@@ -61,6 +61,19 @@
 - معماری کلی سیستم
 
 **مخاطب:** همه تیم‌ها
+
+---
+
+### 5️⃣ راهنمای API استریم
+**فایل:** `5_STREAMING_API_GUIDE.md`
+
+**محتوا:**
+- Server-Sent Events (SSE) format
+- انواع پیام‌ها (status, token, done, error)
+- نمونه کد JavaScript، React، Vue.js
+- مقایسه با API عادی
+
+**مخاطب:** تیم Frontend
 
 ---
 
@@ -129,8 +142,8 @@ curl -X POST http://rag-core:7001/api/v1/query/ \
 - **Distance:** Cosine
 
 ### Rate Limiting
-- **Daily Limit:** 50 query per user
-- **قابل تنظیم:** در `.env`
+- **مدیریت:** سیستم کاربران (Users System)
+- **توجه:** RAG Core فقط آمار استفاده را ذخیره می‌کند
 
 ---
 

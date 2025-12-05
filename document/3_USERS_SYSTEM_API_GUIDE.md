@@ -81,8 +81,9 @@
 
 **Error Responses:**
 - `401 Unauthorized`: JWT token نامعتبر یا منقضی شده
-- `429 Too Many Requests`: محدودیت روزانه کاربر تمام شده
 - `500 Internal Server Error`: خطای سرور
+
+**توجه:** کنترل محدودیت روزانه (429) باید توسط سیستم کاربران قبل از ارسال درخواست انجام شود.
 
 ### 2. پردازش سوال با Streaming
 
@@ -159,16 +160,15 @@ data: {"token": "", "finish_reason": "stop"}
   "username": "user123",
   "email": "user@example.com",
   "full_name": "نام کاربر",
-  "tier": "premium",  // free, basic, premium, enterprise
-  "daily_query_limit": 200,
-  "daily_query_count": 45,
-  "total_query_count": 1250,
+  "total_query_count": 1250,  // آمار استفاده (فقط برای analytics)
   "language": "fa",
   "timezone": "Asia/Tehran",
   "last_active_at": "2025-11-17T06:00:00Z",
   "created_at": "2025-01-01T00:00:00Z"
 }
 ```
+
+**توجه:** مدیریت اشتراک و محدودیت‌ها (tier, daily_limit) توسط سیستم کاربران انجام می‌شود، نه RAG Core.
 
 ### 5. بروزرسانی تنظیمات کاربر
 

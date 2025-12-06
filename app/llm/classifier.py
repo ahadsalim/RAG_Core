@@ -89,10 +89,10 @@ class QueryClassifier:
                 Message(role="user", content=user_message)
             ]
             
-            # فراخوانی LLM با timeout (5 ثانیه)
+            # فراخوانی LLM با timeout (15 ثانیه)
             response = await asyncio.wait_for(
                 self.llm.generate(messages),
-                timeout=5.0
+                timeout=15.0
             )
             
             # پارس کردن پاسخ JSON
@@ -106,7 +106,7 @@ class QueryClassifier:
             return result
             
         except asyncio.TimeoutError:
-            logger.warning("Classification timeout (5s), defaulting to business_no_file")
+            logger.warning("Classification timeout (15s), defaulting to business_no_file")
             return QueryCategory(
                 category="business_no_file",
                 confidence=0.5,

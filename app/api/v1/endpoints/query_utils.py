@@ -15,6 +15,7 @@ import jdatetime
 
 from app.models.user import UserProfile, Conversation, Message as DBMessage, MessageRole
 from app.services.conversation_memory import get_conversation_memory
+from app.services.long_term_memory import get_long_term_memory_service
 from app.services.file_processing_service import get_file_processing_service
 from app.services.storage_service import get_storage_service
 from app.services.file_analysis_service import get_file_analysis_service
@@ -144,7 +145,10 @@ async def get_conversation_context(
     short_term_limit: int = 10
 ) -> Tuple[Optional[str], List[Dict[str, str]], str]:
     """
-    دریافت context کامل مکالمه شامل حافظه بلندمدت و کوتاه‌مدت
+    دریافت context کامل مکالمه شامل:
+    1. حافظه بلندمدت کاربر (اطلاعات پایدار)
+    2. حافظه چت (خلاصه پیام‌های قدیمی این مکالمه)
+    3. حافظه کوتاه‌مدت (10 پیام آخر)
     
     Args:
         db: Database session
@@ -153,40 +157,57 @@ async def get_conversation_context(
         short_term_limit: حداکثر پیام‌های کوتاه‌مدت
         
     Returns:
-        Tuple[long_term_memory, short_term_memory, context_for_classification]
+        Tuple[combined_memory_context, short_term_memory, context_for_classification]
     """
     memory_service = get_conversation_memory()
+    long_term_memory_service = get_long_term_memory_service()
     
-    # حافظه بلندمدت
-    long_term_memory = await memory_service.get_long_term_memory(
-        db, user_id, conversation_id
-    )
+    # 1. حافظه بلندمدت کاربر (اطلاعات پایدار - مشترک بین همه چت‌ها)
+    user_memory_context = await long_term_memory_service.get_memory_context(db, user_id)
     
-    # حافظه کوتاه‌مدت
+    # 2. حافظه چت (خلاصه پیام‌های قدیمی این مکالمه)
+    chat_summary = await memory_service.get_chat_summary(db, conversation_id)
+    
+    # 3. حافظه کوتاه‌مدت (10 پیام آخر)
     short_term_memory = await memory_service.get_short_term_memory(
         db, conversation_id, limit=short_term_limit
     )
     
-    # ترکیب context برای classification
+    # ترکیب حافظه‌ها برای context
+    combined_parts = []
+    
+    # حافظه بلندمدت کاربر (اولویت بالا)
+    if user_memory_context:
+        combined_parts.append(user_memory_context)
+    
+    # خلاصه چت
+    if chat_summary:
+        combined_parts.append(f"خلاصه قسمت قبلی این مکالمه:\n{chat_summary}")
+    
+    combined_memory = "\n\n".join(combined_parts) if combined_parts else None
+    
+    # ترکیب context برای classification (شامل پیام‌های اخیر هم هست)
     context_parts = []
-    if long_term_memory:
-        context_parts.append(f"[خلاصه مکالمات قبلی]\n{long_term_memory}")
+    if combined_memory:
+        context_parts.append(combined_memory)
     if short_term_memory:
-        memory_text = "\n".join([
-            f"{'کاربر' if m['role'] == 'user' else 'دستیار'}: {m['content']}"
-            for m in short_term_memory
-        ])
+        memory_lines = []
+        for m in short_term_memory[-5:]:  # فقط 5 پیام آخر برای classification
+            role = "کاربر" if m['role'] == 'user' else "دستیار"
+            memory_lines.append(f"{role}: {m['content'][:200]}")
+        memory_text = "\n".join(memory_lines)
         context_parts.append(f"[مکالمات اخیر]\n{memory_text}")
     
     context_for_classification = "\n\n".join(context_parts) if context_parts else ""
     
     logger.info(
         "Memory retrieved",
-        has_long_term=bool(long_term_memory),
+        has_user_memory=bool(user_memory_context),
+        has_chat_summary=bool(chat_summary),
         short_term_messages=len(short_term_memory)
     )
     
-    return long_term_memory, short_term_memory, context_for_classification
+    return combined_memory, short_term_memory, context_for_classification
 
 
 def build_llm_context(

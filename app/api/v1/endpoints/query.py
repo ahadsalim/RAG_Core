@@ -18,6 +18,7 @@ from app.models.user import UserProfile, Conversation, Message as DBMessage, Mes
 from app.core.security import get_current_user_id
 from app.config.settings import settings
 from app.services.conversation_memory import get_conversation_memory, ConversationMemory
+from app.services.long_term_memory import get_long_term_memory_service, LongTermMemoryService
 
 # Import shared utilities
 from app.api.v1.endpoints.query_utils import (
@@ -34,8 +35,9 @@ from app.api.v1.endpoints.query_utils import (
 logger = structlog.get_logger()
 router = APIRouter()
 
-# Initialize memory service
+# Initialize memory services
 memory_service: ConversationMemory = get_conversation_memory()
+long_term_memory_service: LongTermMemoryService = get_long_term_memory_service()
 
 
 # Request/Response Models (same as before)
@@ -444,12 +446,24 @@ async def process_query_enhanced(
         
         await db.commit()
         
-        # ========== مرحله 9: به‌روزرسانی حافظه بلندمدت (Background) ==========
+        # ========== مرحله 9: به‌روزرسانی حافظه‌ها (Background) ==========
+        # 9.1: به‌روزرسانی حافظه چت (خلاصه پیام‌های قدیمی)
         background_tasks.add_task(
             memory_service.update_long_term_memory,
             db,
             str(conversation.id),
             force=False
+        )
+        
+        # 9.2: استخراج حافظه بلندمدت کاربر (اطلاعات پایدار)
+        background_tasks.add_task(
+            _extract_and_save_user_memory,
+            db,
+            str(user.id),
+            str(conversation.id),
+            request.query,
+            rag_response.answer,
+            context_for_classification
         )
         
         # ========== مرحله 10: برگرداندن پاسخ ==========
@@ -474,3 +488,53 @@ async def process_query_enhanced(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process query: {str(e)}"
         )
+
+
+async def _extract_and_save_user_memory(
+    db: AsyncSession,
+    user_id: str,
+    conversation_id: str,
+    user_message: str,
+    assistant_response: str,
+    conversation_context: Optional[str]
+):
+    """
+    استخراج و ذخیره حافظه بلندمدت کاربر (Background Task)
+    
+    این تابع بعد از هر پاسخ اجرا می‌شود و بررسی می‌کند که آیا
+    اطلاعات پایداری برای ذخیره وجود دارد یا خیر.
+    """
+    try:
+        # مرحله 1: استخراج حافظه از پیام
+        extraction = await long_term_memory_service.extract_memory_from_message(
+            user_message=user_message,
+            assistant_response=assistant_response,
+            conversation_context=conversation_context
+        )
+        
+        # مرحله 2: اگر حافظه‌ای برای ذخیره وجود دارد
+        if extraction.get("should_write_memory") and extraction.get("memory_to_write"):
+            # مرحله 3: ادغام با حافظه‌های موجود
+            result = await long_term_memory_service.merge_memory(
+                db=db,
+                user_id=user_id,
+                new_memory=extraction["memory_to_write"],
+                category=extraction.get("category", "other"),
+                conversation_id=conversation_id
+            )
+            
+            logger.info(
+                "User memory extraction completed",
+                user_id=user_id,
+                action=result.get("action"),
+                memory_content=extraction["memory_to_write"][:50]
+            )
+        else:
+            logger.debug(
+                "No memory to extract from message",
+                user_id=user_id
+            )
+            
+    except Exception as e:
+        # Background task - فقط لاگ می‌کنیم، خطا نمی‌دهیم
+        logger.error(f"Failed to extract user memory: {e}")

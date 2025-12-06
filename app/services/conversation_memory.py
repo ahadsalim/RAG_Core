@@ -1,6 +1,11 @@
 """
-Conversation Memory Service
-مدیریت حافظه کوتاه‌مدت و بلندمدت مکالمات
+Conversation Memory Service - حافظه چت
+==========================================
+
+سه نوع حافظه:
+1. حافظه کوتاه‌مدت: 10 پیام آخر (متن کامل)
+2. حافظه چت: خلاصه پیام‌های قدیمی + 10 پیام آخر (بعد از 10 پیام)
+3. حافظه بلندمدت: اطلاعات پایدار کاربر (در LongTermMemoryService)
 """
 
 from typing import List, Dict, Any, Optional
@@ -22,8 +27,8 @@ class ConversationMemory:
     
     # تنظیمات حافظه
     SHORT_TERM_MESSAGES = 10  # تعداد پیام‌های اخیر برای حافظه کوتاه‌مدت
-    LONG_TERM_MAX_CHARS = 2000  # حداکثر طول حافظه بلندمدت قبل از خلاصه‌سازی
-    SUMMARY_TRIGGER_MESSAGES = 20  # تعداد پیام‌ها برای trigger خلاصه‌سازی
+    CHAT_SUMMARY_MAX_CHARS = 1500  # حداکثر طول خلاصه چت
+    SUMMARY_TRIGGER_MESSAGES = 10  # بعد از 10 پیام، خلاصه‌سازی شروع می‌شود
     
     def __init__(self):
         """Initialize memory service with LLM for summarization"""
@@ -87,39 +92,31 @@ class ConversationMemory:
             logger.error(f"Failed to get short-term memory: {e}")
             return []
     
-    async def get_long_term_memory(
+    async def get_chat_summary(
         self,
         db: AsyncSession,
-        user_id: str,
-        conversation_id: Optional[str] = None
+        conversation_id: str
     ) -> Optional[str]:
         """
-        دریافت حافظه بلندمدت (خلاصه مکالمات قبلی)
+        دریافت خلاصه چت (حافظه چت)
         
         Args:
             db: Database session
-            user_id: ID کاربر
-            conversation_id: ID مکالمه فعلی (برای exclude کردن)
+            conversation_id: ID مکالمه
             
         Returns:
-            خلاصه مکالمات قبلی یا None
+            خلاصه پیام‌های قدیمی این مکالمه یا None
         """
         try:
-            # دریافت مکالمه فعلی
-            query = select(Conversation).filter(
-                Conversation.user_id == user_id
+            result = await db.execute(
+                select(Conversation).filter(Conversation.id == conversation_id)
             )
-            
-            if conversation_id:
-                query = query.filter(Conversation.id == conversation_id)
-            
-            result = await db.execute(query)
             conversation = result.scalar_one_or_none()
             
             if conversation and conversation.summary:
                 logger.info(
-                    "Long-term memory retrieved",
-                    user_id=user_id,
+                    "Chat summary retrieved",
+                    conversation_id=conversation_id,
                     summary_length=len(conversation.summary)
                 )
                 return conversation.summary
@@ -127,7 +124,7 @@ class ConversationMemory:
             return None
             
         except Exception as e:
-            logger.error(f"Failed to get long-term memory: {e}")
+            logger.error(f"Failed to get chat summary: {e}")
             return None
     
     async def update_long_term_memory(
@@ -170,10 +167,10 @@ class ConversationMemory:
             
             if not force:
                 # خلاصه‌سازی فقط اگر:
-                # 1. تعداد پیام‌ها بیش از حد باشد
+                # 1. تعداد پیام‌ها بیش از 10 باشد
                 # 2. یا خلاصه فعلی خیلی طولانی باشد
-                if (message_count < self.SUMMARY_TRIGGER_MESSAGES and 
-                    current_summary_length < self.LONG_TERM_MAX_CHARS):
+                if (message_count <= self.SUMMARY_TRIGGER_MESSAGES and 
+                    current_summary_length < self.CHAT_SUMMARY_MAX_CHARS):
                     return False
             
             # تهیه متن برای خلاصه‌سازی
@@ -219,25 +216,33 @@ class ConversationMemory:
         if existing_summary:
             parts.append(f"خلاصه قبلی:\n{existing_summary}\n")
         
-        # اضافه کردن پیام‌های جدید
-        parts.append("مکالمات جدید:")
-        for msg in messages[-self.SUMMARY_TRIGGER_MESSAGES:]:
-            role = "کاربر" if msg.role == MessageRole.USER else "سیستم"
-            parts.append(f"{role}: {msg.content}")
+        # اضافه کردن پیام‌هایی که باید خلاصه شوند (بجز 10 پیام آخر)
+        # پیام‌هایی که باید خلاصه شوند = همه بجز 10 تای آخر
+        messages_to_summarize = messages[:-self.SHORT_TERM_MESSAGES] if len(messages) > self.SHORT_TERM_MESSAGES else []
+        
+        if messages_to_summarize:
+            parts.append("مکالمات قدیمی برای خلاصه‌سازی:")
+            for msg in messages_to_summarize:
+                role = "کاربر" if msg.role == MessageRole.USER else "سیستم"
+                parts.append(f"{role}: {msg.content[:500]}")
         
         return "\n".join(parts)
     
     async def _summarize_conversation(self, conversation_text: str) -> Optional[str]:
         """خلاصه‌سازی مکالمه با LLM"""
         try:
-            system_prompt = """تو یک دستیار هوشمند هستی که وظیفه‌ات خلاصه کردن مکالمات است.
-از مکالمه داده شده، موارد مهم زیر را استخراج کن:
-1. موضوعات اصلی که کاربر در موردشان سوال پرسیده
-2. اطلاعات مهم درباره کاربر (نیازها، ترجیحات، زمینه کاری)
-3. نتایج و پاسخ‌های کلیدی
+            system_prompt = """تو یک ماژول خلاصه‌سازی مکالمه هستی.
 
-خلاصه را به صورت مختصر و مفید بنویس (حداکثر 300 کلمه).
-فقط خلاصه را بنویس، بدون توضیحات اضافی."""
+وظیفه: از مکالمات قدیمی داده شده، یک خلاصه مفید بساز که شامل:
+1. موضوعات اصلی که بحث شد
+2. سوالات مهم کاربر و پاسخ‌های کلیدی
+3. نتیجه‌گیری‌ها و تصمیمات
+
+قوانین:
+- حداکثر 200 کلمه
+- فقط اطلاعات مرتبط با این چت را نگه دار
+- جزئیات فنی/حقوقی را خلاصه کن، نه کپی
+- فقط خلاصه را بنویس، بدون توضیح اضافی"""
 
             messages = [
                 Message(role="system", content=system_prompt),
@@ -286,13 +291,13 @@ class ConversationMemory:
         """
         context = []
         
-        # 1. حافظه بلندمدت (خلاصه مکالمات قبلی)
+        # 1. حافظه چت (خلاصه پیام‌های قدیمی این مکالمه)
         if conversation_id:
-            long_term = await self.get_long_term_memory(db, user_id, conversation_id)
-            if long_term:
+            chat_summary = await self.get_chat_summary(db, conversation_id)
+            if chat_summary:
                 context.append({
                     "role": "system",
-                    "content": f"خلاصه مکالمات قبلی با این کاربر:\n{long_term}"
+                    "content": f"خلاصه قسمت قبلی این مکالمه:\n{chat_summary}"
                 })
         
         # 2. حافظه کوتاه‌مدت (پیام‌های اخیر)

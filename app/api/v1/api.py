@@ -13,7 +13,8 @@ from app.api.v1.endpoints import (
     admin,
     sync,
     embedding,
-    tasks
+    tasks,
+    memory
 )
 
 api_router = APIRouter()
@@ -65,4 +66,10 @@ api_router.include_router(
     tasks.router,
     prefix="/tasks",
     tags=["Task Management"]
+)
+
+api_router.include_router(
+    memory.router,
+    prefix="/memory",
+    tags=["User Memory"]
 )

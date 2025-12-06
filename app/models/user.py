@@ -255,6 +255,78 @@ class QueryCache(BaseModel):
         self.last_hit_at = datetime.utcnow()
 
 
+class MemoryCategory(str, enum.Enum):
+    """Categories for user long-term memory items."""
+    PERSONAL_INFO = "personal_info"      # سن، شغل، سطح دانش
+    PREFERENCE = "preference"            # ترجیحات و سلیقه‌ها
+    GOAL = "goal"                        # اهداف و پروژه‌ها
+    INTEREST = "interest"                # علاقه‌مندی‌ها
+    CONTEXT = "context"                  # زمینه کاری/تحصیلی
+    BEHAVIOR = "behavior"                # سبک یادگیری، شخصیت
+    OTHER = "other"
+
+
+class UserMemory(BaseModel):
+    """
+    User Long-Term Memory - حافظه بلندمدت کاربر
+    
+    این جدول اطلاعات پایدار کاربر را ذخیره می‌کند که در تمام مکالمات استفاده می‌شود.
+    هر کاربر می‌تواند چندین آیتم حافظه داشته باشد (5 تا 20 آیتم).
+    """
+    
+    __tablename__ = "user_memories"
+    
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("user_profiles.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    
+    # Memory content
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    
+    # Category for organization
+    category: Mapped[MemoryCategory] = mapped_column(
+        SQLEnum(MemoryCategory),
+        default=MemoryCategory.OTHER,
+        nullable=False
+    )
+    
+    # Source tracking
+    source_conversation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    
+    # Confidence and usage
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)  # 0.0 to 1.0
+    usage_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    
+    # For merging/updating
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    merged_from: Mapped[Optional[List[str]]] = mapped_column(JSONB, default=list)
+    
+    # Soft delete (user can delete their memories)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    # Relationships
+    user: Mapped["UserProfile"] = relationship("UserProfile", backref="memories")
+    
+    __table_args__ = (
+        Index("idx_memory_user", "user_id"),
+        Index("idx_memory_category", "category"),
+        Index("idx_memory_active", "is_active"),
+        Index("idx_memory_user_active", "user_id", "is_active"),
+    )
+    
+    def increment_usage(self):
+        """Increment usage counter."""
+        self.usage_count += 1
+        self.last_used_at = datetime.utcnow()
+
+
 class UserFeedback(BaseModel):
     """User feedback on responses."""
     

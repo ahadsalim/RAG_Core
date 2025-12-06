@@ -17,7 +17,7 @@ from app.rag.pipeline import RAGPipeline, RAGQuery
 from app.models.user import UserProfile, Conversation, Message as DBMessage, MessageRole
 from app.core.security import get_current_user_id
 from app.config.settings import settings
-from app.services.conversation_memory import get_conversation_memory
+from app.services.conversation_memory import get_conversation_memory, ConversationMemory
 
 # Import shared utilities
 from app.api.v1.endpoints.query_utils import (
@@ -33,6 +33,9 @@ from app.api.v1.endpoints.query_utils import (
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+# Initialize memory service
+memory_service: ConversationMemory = get_conversation_memory()
 
 
 # Request/Response Models (same as before)

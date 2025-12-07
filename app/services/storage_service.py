@@ -180,7 +180,7 @@ class StorageService:
     
     async def delete_temp_file(self, object_key: str) -> bool:
         """
-        Delete a file from temporary storage.
+        Delete a file from temporary storage (temp-userfile bucket).
         
         Args:
             object_key: S3 object key
@@ -191,7 +191,7 @@ class StorageService:
         try:
             def _delete_sync():
                 self.s3_client.delete_object(
-                    Bucket=self.bucket_name,
+                    Bucket=self.temp_bucket,  # Use temp-userfile bucket
                     Key=object_key
                 )
             

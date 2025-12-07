@@ -231,6 +231,13 @@ class Settings(BaseSettings):
     s3_region: str = Field(default="us-east-1")
     s3_use_ssl: bool = Field(default=False)
     
+    # Temporary File Expiration
+    temp_file_expiration_hours: int = Field(
+        default=12, 
+        ge=1, 
+        description="Hours to keep user uploaded files in S3 before deletion (file analysis stays in conversation memory)"
+    )
+    
     # External Services
     ingest_api_url: str = Field(default="http://localhost:8000/api")
     ingest_api_key: Optional[str] = Field(default=None)

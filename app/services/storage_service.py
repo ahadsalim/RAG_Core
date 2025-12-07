@@ -70,7 +70,7 @@ class StorageService:
         filename: str,
         user_id: str,
         content_type: str = 'application/octet-stream',
-        expiration_hours: int = 24
+        expiration_hours: int = None
     ) -> Dict[str, Any]:
         """
         Upload a file to temporary storage.
@@ -80,7 +80,7 @@ class StorageService:
             filename: Original filename
             user_id: User ID for organizing files
             content_type: MIME type of the file
-            expiration_hours: Hours until file expires (default 24)
+            expiration_hours: Hours until file expires (default from settings.temp_file_expiration_hours)
             
         Returns:
             Dictionary with file metadata and storage key
@@ -91,8 +91,9 @@ class StorageService:
             timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
             object_key = f"{self.temp_prefix}{user_id}/{timestamp}_{file_id}_{filename}"
             
-            # Calculate expiration
-            expiration_date = datetime.utcnow() + timedelta(hours=expiration_hours)
+            # Calculate expiration (use settings if not provided)
+            hours = expiration_hours if expiration_hours is not None else settings.temp_file_expiration_hours
+            expiration_date = datetime.utcnow() + timedelta(hours=hours)
             
             # Prepare metadata
             metadata = {
@@ -209,7 +210,7 @@ class StorageService:
         self,
         files: List[Dict[str, Any]],
         user_id: str,
-        expiration_hours: int = 24
+        expiration_hours: int = None
     ) -> List[Dict[str, Any]]:
         """
         Upload multiple files to temporary storage.
@@ -217,7 +218,7 @@ class StorageService:
         Args:
             files: List of file dictionaries with 'content', 'filename', 'content_type'
             user_id: User ID
-            expiration_hours: Hours until files expire
+            expiration_hours: Hours until files expire (default from settings.temp_file_expiration_hours)
             
         Returns:
             List of upload results
@@ -256,7 +257,9 @@ class StorageService:
     
     async def cleanup_expired_files(self) -> int:
         """
-        Clean up expired temporary files.
+        Clean up expired temporary files from temp_bucket.
+        Files are deleted after TEMP_FILE_EXPIRATION_HOURS (default 12 hours).
+        Note: File analysis remains in conversation memory.
         
         Returns:
             Number of files deleted
@@ -267,10 +270,10 @@ class StorageService:
             def _list_and_delete_sync():
                 nonlocal deleted_count
                 
-                # List all objects in temp prefix
+                # List all objects in temp bucket with temp_uploads prefix
                 paginator = self.s3_client.get_paginator('list_objects_v2')
                 pages = paginator.paginate(
-                    Bucket=self.bucket_name,
+                    Bucket=self.temp_bucket,  # Use temp-userfile bucket
                     Prefix=self.temp_prefix
                 )
                 
@@ -284,7 +287,7 @@ class StorageService:
                         # Get object metadata
                         try:
                             response = self.s3_client.head_object(
-                                Bucket=self.bucket_name,
+                                Bucket=self.temp_bucket,
                                 Key=obj['Key']
                             )
                             
@@ -297,11 +300,15 @@ class StorageService:
                                 # Delete if expired
                                 if current_time > expiration_date:
                                     self.s3_client.delete_object(
-                                        Bucket=self.bucket_name,
+                                        Bucket=self.temp_bucket,
                                         Key=obj['Key']
                                     )
                                     deleted_count += 1
-                                    logger.info(f"Deleted expired file: {obj['Key']}")
+                                    logger.info(
+                                        "Deleted expired temp file",
+                                        key=obj['Key'],
+                                        expired_at=expiration_str
+                                    )
                         except Exception as e:
                             logger.error(f"Error processing object {obj['Key']}: {e}")
                             continue
@@ -310,7 +317,11 @@ class StorageService:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(self.executor, _list_and_delete_sync)
             
-            logger.info(f"Cleanup completed: {deleted_count} files deleted")
+            logger.info(
+                "Temp files cleanup completed",
+                deleted_count=deleted_count,
+                expiration_hours=settings.temp_file_expiration_hours
+            )
             return deleted_count
             
         except Exception as e:

@@ -72,6 +72,9 @@ class LLMWithFallback:
             )
             self.fallback_llm = OpenAIProvider(self.fallback_config)
         
+        # برای سازگاری با کدهای قدیمی که از self.llm.config استفاده می‌کنند
+        self.config = self.primary_config
+        
         logger.info(
             f"LLMWithFallback initialized",
             primary_model=self.primary_config.model,
@@ -80,7 +83,7 @@ class LLMWithFallback:
             fallback_model=self.fallback_config.model if self.fallback_config else None,
         )
     
-    async def generate(self, messages: List[Message]) -> LLMResponse:
+    async def generate(self, messages: List[Message], **kwargs) -> LLMResponse:
         """
         Generate response with automatic fallback
         اگر primary قبلاً down شده (مثلاً در classification)، مستقیم از fallback استفاده می‌کند
@@ -91,14 +94,13 @@ class LLMWithFallback:
         Returns:
             LLMResponse از primary یا fallback
         """
-        primary_timeout = settings.llm_primary_timeout
-        fallback_timeout = settings.llm_fallback_timeout
+        timeout = settings.llm_primary_timeout  # یک تایم‌اوت برای همه
         
         # اگر primary قبلاً down شده، مستقیم به fallback برو
         if is_primary_llm_down():
             logger.info("Primary LLM is marked as DOWN, using fallback directly for generation")
             if self.fallback_llm:
-                return await self._call_fallback(messages, fallback_timeout)
+                return await self._call_fallback(messages, timeout)
             else:
                 raise Exception("Primary LLM is down and no fallback configured")
         
@@ -107,12 +109,12 @@ class LLMWithFallback:
             logger.debug(f"Trying primary LLM: {self.primary_config.model}")
             response = await asyncio.wait_for(
                 self.primary_llm.generate(messages),
-                timeout=primary_timeout
+                timeout=timeout
             )
             logger.info("Primary LLM responded successfully")
             return response
         except asyncio.TimeoutError:
-            logger.warning(f"Primary LLM timeout ({primary_timeout}s)")
+            logger.warning(f"Primary LLM timeout ({timeout}s)")
             set_primary_llm_down(True)
         except Exception as e:
             logger.warning(f"Primary LLM failed: {e}")
@@ -120,7 +122,7 @@ class LLMWithFallback:
         
         # تلاش با Fallback
         if self.fallback_llm:
-            return await self._call_fallback(messages, fallback_timeout)
+            return await self._call_fallback(messages, timeout)
         else:
             raise Exception("Primary LLM failed and no fallback configured")
     

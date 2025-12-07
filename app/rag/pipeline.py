@@ -99,8 +99,10 @@ class RAGPipeline:
                     confidence=classification.confidence
                 )
             
-            # اگر سوال احوالپرسی، چرت‌وپرت، یا نامعتبر بود → پاسخ مستقیم
-            if classification and classification.category != "business_question":
+            # اگر سوال کسب‌وکار نیست → پاسخ مستقیم (این بخش نباید اجرا شود چون query.py خودش handle می‌کند)
+            # دسته‌های کسب‌وکار: business_no_file, business_with_file
+            business_categories = ["business_no_file", "business_with_file", "business_question"]
+            if classification and classification.category not in business_categories:
                 processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
                 
                 return RAGResponse(
@@ -110,7 +112,7 @@ class RAGPipeline:
                     total_tokens=0,
                     processing_time_ms=processing_time,
                     cached=False,
-                    model_used=self.classifier.llm_config.model
+                    model_used="classifier"
                 )
             
             # فقط برای سوالات واقعی ادامه می‌دهیم

@@ -132,8 +132,8 @@ class Settings(BaseSettings):
     llm2_fallback_model: Optional[str] = Field(default=None, description="Fallback Model for LLM2")
     
     # --- LLM Timeout Settings ---
-    llm_primary_timeout: int = Field(default=15, ge=1, description="Timeout for primary LLM (seconds)")
-    llm_fallback_timeout: int = Field(default=30, ge=1, description="Timeout for fallback LLM (seconds)")
+    # فقط یک تایم‌اوت: اگر primary در این زمان جواب نداد، به fallback می‌رود
+    llm_primary_timeout: int = Field(default=15, ge=1, description="Timeout for primary LLM (seconds) - fallback uses same timeout")
     
     # --- Backward Compatibility (use LLM1 as default) ---
     @property

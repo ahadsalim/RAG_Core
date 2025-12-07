@@ -182,12 +182,12 @@ class QueryClassifier:
             logger.info(f"Trying fallback LLM: {self.fallback_config.model}")
             response = await asyncio.wait_for(
                 self.fallback_llm.generate(messages),
-                timeout=settings.llm_fallback_timeout
+                timeout=settings.llm_primary_timeout  # همان تایم‌اوت برای fallback
             )
             logger.info("Fallback LLM responded successfully")
             return response.content
         except asyncio.TimeoutError:
-            logger.error(f"Fallback LLM timeout ({settings.llm_fallback_timeout}s)")
+            logger.error(f"Fallback LLM timeout ({settings.llm_primary_timeout}s)")
             raise Exception("Fallback LLM timed out")
         except Exception as e:
             logger.error(f"Fallback LLM failed: {e}")
@@ -406,7 +406,7 @@ Return JSON only (no markdown):
             
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse classification JSON: {e}")
-            logger.debug(f"Response was: {response}")
+            logger.warning(f"Raw response was: '{response[:500] if response else 'EMPTY'}'")
             
             # fallback: تشخیص دستی
             response_lower = response.lower()

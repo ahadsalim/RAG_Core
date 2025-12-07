@@ -636,13 +636,23 @@ class RAGPipeline:
         """Extract detailed sources from chunks with full context."""
         sources = []
         seen = set()
+        source_number = 0  # شماره‌گذاری صحیح منابع
         
-        for i, chunk in enumerate(chunks, 1):
+        for chunk in chunks:
             metadata = chunk.metadata
+            
+            # جلوگیری از تکرار بر اساس document_id + unit_number
+            source_key = f"{metadata.get('document_id', '')}_{metadata.get('unit_number', '')}"
+            if source_key in seen:
+                continue  # این chunk تکراری است، رد شو
+            seen.add(source_key)
+            
+            # افزایش شماره منبع فقط برای منابع غیرتکراری
+            source_number += 1
             source_lines = []
             
             # 1. شماره منبع و متن کامل
-            source_lines.append(f"📌 منبع {i}:")
+            source_lines.append(f"📌 منبع {source_number}:")
             source_lines.append(f"📄 متن: {chunk.text}")
             source_lines.append("")  # خط خالی
             
@@ -657,7 +667,7 @@ class RAGPipeline:
                 work_title = doc_title
             
             if work_title:
-                source_lines.append(f"� نام سند: {work_title}")
+                source_lines.append(f"📚 نام سند: {work_title}")
                 if doc_type and doc_type != work_title:
                     source_lines.append(f"📋 نوع: {doc_type}")
             
@@ -695,12 +705,7 @@ class RAGPipeline:
             
             # ساخت source نهایی
             source = "\n".join(source_lines)
-            
-            # جلوگیری از تکرار بر اساس document_id + unit_number
-            source_key = f"{metadata.get('document_id', '')}_{metadata.get('unit_number', '')}"
-            if source_key not in seen:
-                sources.append(source)
-                seen.add(source_key)
+            sources.append(source)
         
         return sources
     

@@ -38,17 +38,10 @@ class LongTermMemoryService:
     MIN_MEMORY_ITEMS = 5   # حداقل تعداد آیتم‌ها قبل از خلاصه‌سازی
     
     def __init__(self):
-        """Initialize with LLM for memory extraction and summarization."""
-        self.llm_config = LLMConfig(
-            provider=LLMProvider.OPENAI_COMPATIBLE,
-            model=settings.llm_model,
-            api_key=settings.llm_api_key,
-            base_url=settings.llm_base_url,
-            temperature=0.2,  # کم برای دقت بالا
-            max_tokens=500,
-        )
-        self.llm = OpenAIProvider(self.llm_config)
-        logger.info("LongTermMemoryService initialized")
+        """Initialize with LLM1 (Light) for memory extraction and summarization."""
+        from app.llm.factory import create_llm1_light
+        self.llm = create_llm1_light()
+        logger.info("LongTermMemoryService initialized with LLM1 (Light)")
     
     # ==================== ماژول 1: تشخیص و استخراج حافظه ====================
     

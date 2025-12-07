@@ -31,17 +31,10 @@ class ConversationMemory:
     SUMMARY_TRIGGER_MESSAGES = 10  # بعد از 10 پیام، خلاصه‌سازی شروع می‌شود
     
     def __init__(self):
-        """Initialize memory service with LLM for summarization"""
-        self.llm_config = LLMConfig(
-            provider=LLMProvider.OPENAI_COMPATIBLE,
-            model=settings.llm_model,
-            api_key=settings.llm_api_key,
-            base_url=settings.llm_base_url,
-            temperature=0.3,
-            max_tokens=500,
-        )
-        self.llm = OpenAIProvider(self.llm_config)
-        logger.info("ConversationMemory initialized")
+        """Initialize memory service with LLM1 (Light) for summarization"""
+        from app.llm.factory import create_llm1_light
+        self.llm = create_llm1_light()
+        logger.info("ConversationMemory initialized with LLM1 (Light)")
     
     async def get_short_term_memory(
         self,

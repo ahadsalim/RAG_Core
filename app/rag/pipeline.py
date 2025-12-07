@@ -17,6 +17,7 @@ from app.services.embedding_service import get_embedding_service  # Unified embe
 from app.llm.openai_provider import OpenAIProvider
 from app.llm.base import Message, LLMConfig
 from app.llm.classifier import QueryClassifier
+from app.llm.factory import create_llm2_pro  # LLM2 (Pro) برای سوالات کسب‌وکار
 from app.core.dependencies import get_redis_client
 from app.config.settings import settings
 
@@ -67,9 +68,11 @@ class RAGPipeline:
         self.qdrant = QdrantService()
         # Use unified embedding service (auto-detects API vs local)
         self.embedder = get_embedding_service()
-        self.llm = OpenAIProvider()
+        # استفاده از LLM2 (Pro) برای سوالات کسب‌وکار
+        self.llm = create_llm2_pro()
         self.classifier = QueryClassifier()  # LLM برای دسته‌بندی سوالات
         self.reranker = None  # Will be initialized if needed
+        logger.info("RAG Pipeline initialized with LLM2 (Pro)")
         
     async def process(self, query: RAGQuery, additional_context: str = None) -> RAGResponse:
         """

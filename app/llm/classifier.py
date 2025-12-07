@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel
 from app.llm.base import LLMConfig, LLMProvider, Message
 from app.llm.openai_provider import OpenAIProvider
+from app.llm.state import is_primary_llm_down, set_primary_llm_down
 from app.config.settings import settings
 import structlog
 
@@ -29,16 +30,16 @@ class QueryCategory(BaseModel):
 
 
 class QueryClassifier:
-    """دسته‌بندی کننده سوالات با LLM"""
+    """دسته‌بندی کننده سوالات با LLM و پشتیبانی از Fallback"""
     
     def __init__(self):
-        """Initialize classifier with dedicated LLM"""
+        """Initialize classifier with primary and fallback LLM"""
         from app.config.prompts import LLMConfig as LLMConfigPresets
         
-        # استفاده از LLM جداگانه برای classification
         config_presets = LLMConfigPresets.get_config_for_classification()
         
-        self.llm_config = LLMConfig(
+        # --- Primary LLM ---
+        self.primary_config = LLMConfig(
             provider=LLMProvider.OPENAI_COMPATIBLE,
             model=settings.llm_classification_model or settings.llm_model,
             api_key=settings.llm_classification_api_key or settings.llm_api_key,
@@ -46,8 +47,28 @@ class QueryClassifier:
             temperature=settings.llm_classification_temperature or config_presets["temperature"],
             max_tokens=settings.llm_classification_max_tokens or config_presets["max_tokens"],
         )
-        self.llm = OpenAIProvider(self.llm_config)
-        logger.info(f"QueryClassifier initialized with model: {self.llm_config.model}")
+        self.primary_llm = OpenAIProvider(self.primary_config)
+        
+        # --- Fallback LLM ---
+        self.fallback_llm = None
+        fallback_api_key = settings.llm_classification_fallback_api_key or settings.llm_fallback_api_key
+        if fallback_api_key:
+            self.fallback_config = LLMConfig(
+                provider=LLMProvider.OPENAI_COMPATIBLE,
+                model=settings.llm_classification_fallback_model or settings.llm_fallback_model or "gpt-4o-mini",
+                api_key=fallback_api_key,
+                base_url=settings.llm_classification_fallback_base_url or settings.llm_fallback_base_url or "https://api.openai.com/v1",
+                temperature=settings.llm_classification_temperature or config_presets["temperature"],
+                max_tokens=settings.llm_classification_max_tokens or config_presets["max_tokens"],
+            )
+            self.fallback_llm = OpenAIProvider(self.fallback_config)
+            logger.info(f"QueryClassifier fallback initialized: {self.fallback_config.model} @ {self.fallback_config.base_url}")
+        
+        # For backward compatibility
+        self.llm_config = self.primary_config
+        self.llm = self.primary_llm
+        
+        logger.info(f"QueryClassifier primary initialized: {self.primary_config.model} @ {self.primary_config.base_url}")
     
     async def classify(
         self,
@@ -89,14 +110,11 @@ class QueryClassifier:
                 Message(role="user", content=user_message)
             ]
             
-            # فراخوانی LLM با timeout (15 ثانیه)
-            response = await asyncio.wait_for(
-                self.llm.generate(messages),
-                timeout=15.0
-            )
+            # تلاش با Primary LLM
+            response = await self._try_llm_with_fallback(messages)
             
             # پارس کردن پاسخ JSON
-            result = self._parse_classification_response(response.content)
+            result = self._parse_classification_response(response)
             
             logger.info(
                 f"Query classified: category={result.category}, "
@@ -105,16 +123,8 @@ class QueryClassifier:
             
             return result
             
-        except asyncio.TimeoutError:
-            logger.warning("Classification timeout (15s), defaulting to business_no_file")
-            return QueryCategory(
-                category="business_no_file",
-                confidence=0.5,
-                reason="Classification timeout, defaulting to business_no_file",
-                needs_clarification=False
-            )
         except Exception as e:
-            logger.error(f"Classification failed: {e}")
+            logger.error(f"Classification failed (all providers): {e}")
             # در صورت خطا، فرض می‌کنیم سوال واقعی است
             return QueryCategory(
                 category="business_no_file",
@@ -122,6 +132,66 @@ class QueryClassifier:
                 reason=f"Classification failed: {str(e)}",
                 needs_clarification=False
             )
+    
+    async def _try_llm_with_fallback(self, messages: list) -> str:
+        """
+        تلاش برای فراخوانی LLM با fallback در صورت خطا
+        اگر primary قبلاً down شده، مستقیم از fallback استفاده می‌کند
+        
+        Args:
+            messages: لیست پیام‌ها
+            
+        Returns:
+            محتوای پاسخ LLM
+        """
+        timeout = settings.llm_primary_timeout
+        
+        # اگر primary قبلاً down شده، مستقیم به fallback برو
+        if is_primary_llm_down():
+            logger.info("Primary LLM is marked as DOWN, using fallback directly")
+            if self.fallback_llm:
+                return await self._call_fallback(messages, timeout)
+            else:
+                raise Exception("Primary LLM is down and no fallback configured")
+        
+        # تلاش با Primary
+        try:
+            logger.debug(f"Trying primary LLM: {self.primary_config.model}")
+            response = await asyncio.wait_for(
+                self.primary_llm.generate(messages),
+                timeout=timeout
+            )
+            logger.info("Primary LLM responded successfully")
+            return response.content
+        except asyncio.TimeoutError:
+            logger.warning(f"Primary LLM timeout ({timeout}s)")
+            set_primary_llm_down(True)  # Mark primary as down
+        except Exception as e:
+            logger.warning(f"Primary LLM failed: {e}")
+            set_primary_llm_down(True)  # Mark primary as down
+        
+        # تلاش با Fallback
+        if self.fallback_llm:
+            return await self._call_fallback(messages, timeout)
+        else:
+            raise Exception("Primary LLM failed and no fallback configured")
+    
+    async def _call_fallback(self, messages: list, timeout: float) -> str:
+        """فراخوانی Fallback LLM"""
+        try:
+            logger.info(f"Trying fallback LLM: {self.fallback_config.model}")
+            response = await asyncio.wait_for(
+                self.fallback_llm.generate(messages),
+                timeout=settings.llm_fallback_timeout
+            )
+            logger.info("Fallback LLM responded successfully")
+            return response.content
+        except asyncio.TimeoutError:
+            logger.error(f"Fallback LLM timeout ({settings.llm_fallback_timeout}s)")
+            raise Exception("Fallback LLM timed out")
+        except Exception as e:
+            logger.error(f"Fallback LLM failed: {e}")
+            raise Exception(f"Fallback LLM failed: {e}")
     
     def _build_classification_prompt(self, language: str) -> str:
         """ساخت prompt برای دسته‌بندی"""
@@ -159,12 +229,13 @@ class QueryClassifier:
    
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**3. general_no_business** - سوال مفهوم اما نامرتبط با کسب و کار
-   شامل: احوالپرسی، سوالات عمومی، جوک، پزشکی، ورزشی، سرگرمی، ...
+**3. general_no_business** - سوال مفهوم اما نامرتبط با کسب و کار (با یا بدون فایل)
+   شامل: احوالپرسی، سوالات عمومی، جوک، پزشکی، ورزشی، سرگرمی، آموزشی، علمی، ...
    مثال: "سلام چطوری", "هوا چطوره", "یک جوک بگو", "سردرد دارم چیکار کنم"
+   مثال با فایل: "این آزمایش خون من است، تحلیل کن", "این عکس چیست؟", "ترجمه کن"
    
    **اقدام:** به صورت عمومی پاسخ بده (بدون استفاده از RAG)
-   توجه: اگر فایل دارد، فایل را هم در نظر بگیر
+   **مهم:** اگر فایل دارد، حتماً فایل را تحلیل کن و در پاسخ استفاده کن!
    
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

@@ -60,15 +60,28 @@ class OpenAIProvider(BaseLLM):
             formatted_messages = self.prepare_messages(messages)
             
             # Merge kwargs with config
+            max_tokens_value = kwargs.get("max_tokens", self.config.max_tokens)
+            
+            # مدل‌های جدید (gpt-5, o1, o3) محدودیت‌های خاصی دارند
+            is_new_model = any(x in self.config.model for x in ["gpt-5", "o1", "o3"])
+            
             params = {
                 "model": self.config.model,
                 "messages": formatted_messages,
-                "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
-                "temperature": kwargs.get("temperature", self.config.temperature),
-                "top_p": kwargs.get("top_p", self.config.top_p),
-                "frequency_penalty": kwargs.get("frequency_penalty", self.config.frequency_penalty),
-                "presence_penalty": kwargs.get("presence_penalty", self.config.presence_penalty),
             }
+            
+            # مدل‌های جدید از temperature و top_p پشتیبانی نمی‌کنند
+            if not is_new_model:
+                params["temperature"] = kwargs.get("temperature", self.config.temperature)
+                params["top_p"] = kwargs.get("top_p", self.config.top_p)
+                params["frequency_penalty"] = kwargs.get("frequency_penalty", self.config.frequency_penalty)
+                params["presence_penalty"] = kwargs.get("presence_penalty", self.config.presence_penalty)
+            
+            # gpt-5-nano و مدل‌های جدید از max_completion_tokens استفاده می‌کنند
+            if is_new_model:
+                params["max_completion_tokens"] = max_tokens_value
+            else:
+                params["max_tokens"] = max_tokens_value
             
             if self.config.stop_sequences:
                 params["stop"] = self.config.stop_sequences
@@ -109,14 +122,27 @@ class OpenAIProvider(BaseLLM):
             formatted_messages = self.prepare_messages(messages)
             
             # Merge kwargs with config
+            max_tokens_value = kwargs.get("max_tokens", self.config.max_tokens)
+            
+            # مدل‌های جدید (gpt-5, o1, o3) محدودیت‌های خاصی دارند
+            is_new_model = any(x in self.config.model for x in ["gpt-5", "o1", "o3"])
+            
             params = {
                 "model": self.config.model,
                 "messages": formatted_messages,
-                "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
-                "temperature": kwargs.get("temperature", self.config.temperature),
-                "top_p": kwargs.get("top_p", self.config.top_p),
                 "stream": True,
             }
+            
+            # مدل‌های جدید از temperature و top_p پشتیبانی نمی‌کنند
+            if not is_new_model:
+                params["temperature"] = kwargs.get("temperature", self.config.temperature)
+                params["top_p"] = kwargs.get("top_p", self.config.top_p)
+            
+            # gpt-5-nano و مدل‌های جدید از max_completion_tokens استفاده می‌کنند
+            if is_new_model:
+                params["max_completion_tokens"] = max_tokens_value
+            else:
+                params["max_tokens"] = max_tokens_value
             
             # Call OpenAI API with streaming
             stream = await self.client.chat.completions.create(**params)

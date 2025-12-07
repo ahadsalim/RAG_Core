@@ -256,21 +256,14 @@ async def process_query_enhanced(
             
             # ========== مسیر 3: general_no_business - سوال عمومی غیر کسب‌وکار ==========
             elif classification.category == "general_no_business":
-                logger.info("Handling general_no_business: using LLM without RAG")
+                logger.info("Handling general_no_business: using LLM1 (Light) without RAG")
                 
-                # استفاده از LLM به صورت عمومی (بدون RAG)
-                from app.llm.openai_provider import OpenAIProvider
-                from app.llm.base import LLMConfig, LLMProvider as LLMProviderEnum, Message
-                from app.config.prompts import LLMConfig as LLMConfigPresets, SystemPrompts
+                # استفاده از LLM1 (Light) برای سوالات ساده
+                from app.llm.factory import get_llm_for_category
+                from app.llm.base import Message
+                from app.config.prompts import SystemPrompts
                 
-                llm_config = LLMConfig(
-                    provider=LLMProviderEnum.OPENAI_COMPATIBLE,
-                    model=settings.llm_model,
-                    api_key=settings.llm_api_key,
-                    base_url=settings.llm_base_url,
-                    **LLMConfigPresets.get_config_for_general_questions()
-                )
-                llm = OpenAIProvider(llm_config)
+                llm = get_llm_for_category(classification.category)
                 
                 # دریافت تاریخ و ساعت فعلی (شمسی)
                 current_date_shamsi, current_time_fa = get_current_shamsi_datetime()

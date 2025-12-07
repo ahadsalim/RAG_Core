@@ -103,20 +103,73 @@ class Settings(BaseSettings):
     celery_timezone: str = Field(default="Asia/Tehran")
     celery_enable_utc: bool = Field(default=False)
     
-    # LLM Configuration (Unified for OpenAI-compatible APIs)
-    llm_api_key: Optional[str] = Field(default=None, description="API Key or Token for LLM")
-    llm_base_url: Optional[str] = Field(default=None, description="Base URL for OpenAI-compatible API")
-    llm_model: str = Field(default="gpt-4-turbo-preview", description="Model name")
-    llm_max_tokens: int = Field(default=4096, ge=1, description="Maximum output tokens")
-    llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperature for generation")
+    # ===========================================================================
+    # LLM1 (Light) - برای سوالات عمومی: invalid, general
+    # ===========================================================================
+    llm1_api_key: Optional[str] = Field(default=None, description="API Key for LLM1 (Light)")
+    llm1_base_url: Optional[str] = Field(default=None, description="Base URL for LLM1")
+    llm1_model: str = Field(default="gpt-4o-mini", description="Model for LLM1")
+    llm1_max_tokens: int = Field(default=2048, ge=1, description="Max tokens for LLM1")
+    llm1_temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperature for LLM1")
+    
+    # Fallback for LLM1
+    llm1_fallback_api_key: Optional[str] = Field(default=None, description="Fallback API Key for LLM1")
+    llm1_fallback_base_url: Optional[str] = Field(default=None, description="Fallback Base URL for LLM1")
+    llm1_fallback_model: Optional[str] = Field(default=None, description="Fallback Model for LLM1")
+    
+    # ===========================================================================
+    # LLM2 (Pro) - برای سوالات کسب‌وکار: business
+    # ===========================================================================
+    llm2_api_key: Optional[str] = Field(default=None, description="API Key for LLM2 (Pro)")
+    llm2_base_url: Optional[str] = Field(default=None, description="Base URL for LLM2")
+    llm2_model: str = Field(default="gpt-5-mini", description="Model for LLM2")
+    llm2_max_tokens: int = Field(default=4096, ge=1, description="Max tokens for LLM2")
+    llm2_temperature: float = Field(default=0.4, ge=0.0, le=2.0, description="Temperature for LLM2")
+    
+    # Fallback for LLM2
+    llm2_fallback_api_key: Optional[str] = Field(default=None, description="Fallback API Key for LLM2")
+    llm2_fallback_base_url: Optional[str] = Field(default=None, description="Fallback Base URL for LLM2")
+    llm2_fallback_model: Optional[str] = Field(default=None, description="Fallback Model for LLM2")
+    
+    # --- LLM Timeout Settings ---
+    llm_primary_timeout: int = Field(default=15, ge=1, description="Timeout for primary LLM (seconds)")
+    llm_fallback_timeout: int = Field(default=30, ge=1, description="Timeout for fallback LLM (seconds)")
+    
+    # --- Backward Compatibility (use LLM1 as default) ---
+    @property
+    def llm_api_key(self) -> Optional[str]:
+        return self.llm1_api_key
+    
+    @property
+    def llm_base_url(self) -> Optional[str]:
+        return self.llm1_base_url
+    
+    @property
+    def llm_model(self) -> str:
+        return self.llm1_model
+    
+    @property
+    def llm_max_tokens(self) -> int:
+        return self.llm1_max_tokens
+    
+    @property
+    def llm_temperature(self) -> float:
+        return self.llm1_temperature
     
     # LLM Classification (for query categorization)
     enable_query_classification: bool = Field(default=True, description="Enable query classification (can disable for faster response)")
+    
+    # --- Primary Classification LLM ---
     llm_classification_api_key: Optional[str] = Field(default=None, description="API Key for classification LLM")
     llm_classification_base_url: Optional[str] = Field(default=None, description="Base URL for classification LLM")
     llm_classification_model: Optional[str] = Field(default=None, description="Model for classification")
     llm_classification_max_tokens: int = Field(default=512, ge=1, description="Max tokens for classification")
     llm_classification_temperature: float = Field(default=0.2, ge=0.0, le=2.0, description="Temperature for classification")
+    
+    # --- Fallback Classification LLM ---
+    llm_classification_fallback_api_key: Optional[str] = Field(default=None, description="Fallback API Key for classification")
+    llm_classification_fallback_base_url: Optional[str] = Field(default=None, description="Fallback Base URL for classification")
+    llm_classification_fallback_model: Optional[str] = Field(default=None, description="Fallback Model for classification")
     
     # Embedding Configuration
     embedding_model: str = Field(default="intfloat/multilingual-e5-large", description="Embedding model name")

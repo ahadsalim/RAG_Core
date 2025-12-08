@@ -159,13 +159,13 @@ async def process_query_enhanced(
             )
             
             # ========== مسیر 1: invalid_no_file - متن نامعتبر بدون فایل ==========
-            # اما اگر context دارد، ممکن است follow-up باشد، پس به general_no_business می‌فرستیم
+            # اما اگر context دارد، ممکن است follow-up باشد، پس به general می‌فرستیم
             if classification.category == "invalid_no_file":
                 # اگر memory داریم، احتمالاً follow-up است
                 if short_term_memory or long_term_memory:
-                    logger.info("invalid_no_file but has memory context - treating as general_no_business")
-                    # به جای invalid، به عنوان general_no_business handle می‌کنیم
-                    classification.category = "general_no_business"
+                    logger.info("invalid_no_file but has memory context - treating as general")
+                    # به جای invalid، به عنوان general handle می‌کنیم
+                    classification.category = "general"
                 else:
                     logger.info("Handling invalid_no_file: asking for clarification")
                     
@@ -254,9 +254,9 @@ async def process_query_enhanced(
                     context_used=False
                 )
             
-            # ========== مسیر 3: general_no_business - سوال عمومی غیر کسب‌وکار ==========
-            elif classification.category == "general_no_business":
-                logger.info("Handling general_no_business: using LLM1 (Light) without RAG")
+            # ========== مسیر 3: general - سوال عمومی غیر کسب‌وکار ==========
+            elif classification.category == "general":
+                logger.info("Handling general: using LLM1 (Light) without RAG")
                 
                 # استفاده از LLM1 (Light) برای سوالات ساده
                 from app.llm.factory import get_llm_for_category

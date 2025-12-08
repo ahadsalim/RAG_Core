@@ -99,14 +99,17 @@ class RAGPipeline:
                     confidence=classification.confidence
                 )
             
-            # اگر سوال کسب‌وکار نیست → پاسخ مستقیم (این بخش نباید اجرا شود چون query.py خودش handle می‌کند)
-            # دسته‌های کسب‌وکار: business_no_file, business_with_file
-            business_categories = ["business_no_file", "business_with_file", "business_question"]
-            if classification and classification.category not in business_categories:
+            # دسته‌بندی‌های مختلف:
+            # 1. invalid_no_file, invalid_with_file → پاسخ مستقیم از کلاسیفیکیشن (direct_response)
+            # 2. general → ارسال به LLM1 برای پاسخ عمومی (بدون RAG)
+            # 3. business_no_file, business_with_file → ادامه به RAG
+            
+            invalid_categories = ["invalid_no_file", "invalid_with_file"]
+            if classification and classification.category in invalid_categories:
+                # پاسخ مستقیم برای سوالات نامعتبر
                 processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-                
                 return RAGResponse(
-                    answer=classification.direct_response or "متاسفانه نمی‌توانم به این سوال پاسخ دهم.",
+                    answer=classification.direct_response or "لطفاً سوال خود را واضح‌تر بیان کنید.",
                     chunks=[],
                     sources=[],
                     total_tokens=0,
@@ -114,6 +117,26 @@ class RAGPipeline:
                     cached=False,
                     model_used="classifier"
                 )
+            
+            if classification and classification.category == "general":
+                # سوالات عمومی → ارسال به LLM1 بدون RAG
+                processing_time_start = datetime.utcnow()
+                try:
+                    llm_response = await self._generate_general_response(query.text)
+                    processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                    return RAGResponse(
+                        answer=llm_response,
+                        chunks=[],
+                        sources=[],
+                        total_tokens=0,
+                        processing_time_ms=processing_time,
+                        cached=False,
+                        model_used="llm1_general"
+                    )
+                except Exception as e:
+                    logger.error(f"Error generating general response: {e}")
+                    # در صورت خطا، ادامه به RAG
+                    pass
             
             # فقط برای سوالات واقعی ادامه می‌دهیم
             
@@ -208,6 +231,40 @@ class RAGPipeline:
         except Exception as e:
             logger.error(f"RAG pipeline error: {e}")
             raise
+    
+    async def _generate_general_response(self, query_text: str) -> str:
+        """
+        تولید پاسخ برای سوالات عمومی (غیر تخصصی) با LLM1.
+        بدون استفاده از RAG - فقط دانش عمومی مدل.
+        
+        Args:
+            query_text: متن سوال کاربر
+            
+        Returns:
+            پاسخ تولید شده توسط LLM
+        """
+        system_prompt = """شما یک دستیار هوشمند فارسی‌زبان هستید.
+به سوالات عمومی کاربر پاسخ دهید.
+
+قوانین مهم:
+1. هرگز نام مدل یا شرکت سازنده خود را فاش نکنید
+2. هرگز به تاریخ آموزش یا محدودیت‌های دانش خود اشاره نکنید
+3. خود را "دستیار هوشمند" معرفی کنید
+4. پاسخ‌ها باید مختصر، مفید و دوستانه باشند
+5. اگر سوال خارج از توانایی شماست، مودبانه بگویید که نمی‌توانید کمک کنید"""
+
+        messages = [
+            Message(role="system", content=system_prompt),
+            Message(role="user", content=query_text)
+        ]
+        
+        response = await self.llm.generate(
+            messages=messages,
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        return response.content
     
     async def _enhance_query(self, query: RAGQuery) -> str:
         """

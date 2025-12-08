@@ -197,7 +197,7 @@ class LLMWithFallback:
 def create_llm1_light() -> LLMWithFallback:
     """
     ایجاد LLM1 (Light) برای سوالات ساده
-    استفاده برای: invalid_no_file, invalid_with_file, general_no_business
+    استفاده برای: invalid_no_file, invalid_with_file, general
     """
     primary_config = LLMConfig(
         provider=LLMProvider.OPENAI_COMPATIBLE,
@@ -271,7 +271,7 @@ def get_llm_for_category(category: str) -> LLMWithFallback:
         LLMWithFallback مناسب
     """
     # LLM1 (Light) برای سوالات ساده
-    if category in ["invalid_no_file", "invalid_with_file", "general_no_business"]:
+    if category in ["invalid_no_file", "invalid_with_file", "general"]:
         return create_llm1_light()
     
     # LLM2 (Pro) برای سوالات کسب‌وکار

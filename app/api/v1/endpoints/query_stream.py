@@ -108,14 +108,14 @@ async def stream_query_response(
                 file_analysis=file_analysis
             )
             
-            # اگر invalid_no_file است اما memory دارد، به general_no_business تبدیل می‌کنیم
+            # اگر invalid_no_file است اما memory دارد، به general تبدیل می‌کنیم
             if classification.category == "invalid_no_file" and (short_term_memory or long_term_memory):
-                classification.category = "general_no_business"
+                classification.category = "general"
             
             yield f"data: {json.dumps({'type': 'classification', 'category': classification.category, 'confidence': classification.confidence}, ensure_ascii=False)}\n\n"
             
             # Handle non-business questions
-            if classification.category in ["invalid_no_file", "invalid_with_file", "general_no_business"]:
+            if classification.category in ["invalid_no_file", "invalid_with_file", "general"]:
                 # Use LLM directly for streaming
                 from app.config.prompts import LLMConfig as LLMConfigPresets
                 
@@ -149,13 +149,13 @@ async def stream_query_response(
                             current_date_shamsi=current_date_shamsi,
                             current_time_fa=current_time_fa
                         )
-                else:  # general_no_business
+                else:  # general
                     system_msg = SystemPrompts.get_system_identity_short(
                         current_date_shamsi=current_date_shamsi,
                         current_time_fa=current_time_fa
                     )
                 
-                # Build user message with context for general_no_business
+                # Build user message with context for general
                 user_message_parts = []
                 
                 # 1. Long-term memory

@@ -442,10 +442,10 @@ async def classify_query_with_context(
         file_analysis=file_analysis
     )
     
-    # اگر invalid_no_file است اما memory دارد، به general_no_business تبدیل می‌کنیم
+    # اگر invalid_no_file است اما memory دارد، به general تبدیل می‌کنیم
     if classification.category == "invalid_no_file" and (short_term_memory or long_term_memory):
-        logger.info("invalid_no_file but has memory context - treating as general_no_business")
-        classification.category = "general_no_business"
+        logger.info("invalid_no_file but has memory context - treating as general")
+        classification.category = "general"
     
     logger.info(
         "Query classified",

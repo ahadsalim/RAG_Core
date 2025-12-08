@@ -21,7 +21,7 @@ logger = structlog.get_logger()
 
 class QueryCategory(BaseModel):
     """دسته‌بندی سوال"""
-    category: str  # "invalid_no_file", "invalid_with_file", "general_no_business", "business_no_file", "business_with_file"
+    category: str  # "invalid_no_file", "invalid_with_file", "general", "business_no_file", "business_with_file"
     confidence: float  # 0.0 to 1.0
     direct_response: Optional[str] = None  # پاسخ مستقیم برای موارد غیر سوالی
     has_meaningful_files: Optional[bool] = None  # آیا فایل‌ها معنادار هستند؟
@@ -228,7 +228,7 @@ class QueryClassifier:
 *   **نکته ظریف:** اگر متن کاربر دقیق باشد (مثلاً "خلاصه این قرارداد را بگو")، این دسته انتخاب **نمی‌شود** (به دسته 5 بروید). این دسته فقط برای زمانی است که متن کاربر **مبهم** است.
 *   **اقدام:** بر اساس تحلیل فایل، سوال هوشمندانه بپرس.
 
-### **3. general_no_business** (عمومی / غیرتخصصی)
+### **3. general** (عمومی / غیرتخصصی)
 *   **تعریف:** هر موضوعی که نیاز به دانش تخصصی حقوقی، مالی یا اداری نداشته باشد.
 *   **شامل:** احوالپرسی ("سلام"، "خسته نباشید")، سوالات علمی، پزشکی، ورزشی، آشپزی، جوک، ترجمه متن عمومی.
 *   **مثال با فایل:** "این آزمایش خون من است، تحلیل کن"، "این عکس چیست؟"، "ترجمه کن" (اگر متن حقوقی نباشد).
@@ -267,7 +267,7 @@ class QueryClassifier:
 خروجی باید **فقط یک آبجکت JSON** باشد (بدون ```json یا توضیحات اضافه):
 
 {
-  "category": "invalid_no_file | invalid_with_file | general_no_business | business_no_file | business_with_file",
+  "category": "invalid_no_file | invalid_with_file | general | business_no_file | business_with_file",
   "confidence": 0.0-1.0,
   "direct_response": "متن پاسخ یا null",
   "has_meaningful_files": true/false/null,
@@ -289,11 +289,11 @@ class QueryClassifier:
 خروجی:
 {"category": "invalid_with_file", "confidence": 0.90, "direct_response": "فایل شما یک قرارداد کار است. چه جنبه‌ای را می‌خواهید بررسی کنم؟", "has_meaningful_files": true, "needs_clarification": true}
 
-**مثال 3 - general_no_business:**
+**مثال 3 - general:**
 ورودی: "سلام، یک جوک بگو"
 فایل: ندارد
 خروجی:
-{"category": "general_no_business", "confidence": 0.98, "direct_response": null, "has_meaningful_files": null, "needs_clarification": false}
+{"category": "general", "confidence": 0.98, "direct_response": null, "has_meaningful_files": null, "needs_clarification": false}
 
 **مثال 4 - business_no_file:**
 ورودی: "قانون کار در مورد اخراج چه می‌گوید؟"
@@ -344,7 +344,7 @@ Task: Classify user input + file attachment + context into exactly one of 5 cate
    Example: "check this" + PDF (unclear what to check)
    Set has_meaningful_files: true/false based on file content
 
-3. **general_no_business** - General topics NOT related to business/law
+3. **general** - General topics NOT related to business/law
    Example: greetings, jokes, weather, health, sports, general translation
 
 4. **business_no_file** - Business/legal question WITHOUT file
@@ -368,7 +368,7 @@ Task: Classify user input + file attachment + context into exactly one of 5 cate
 
 Return JSON only (no markdown):
 {
-  "category": "invalid_no_file | invalid_with_file | general_no_business | business_no_file | business_with_file",
+  "category": "invalid_no_file | invalid_with_file | general | business_no_file | business_with_file",
   "confidence": 0.0-1.0,
   "direct_response": "Response string or null",
   "has_meaningful_files": true/false/null,

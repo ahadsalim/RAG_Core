@@ -243,15 +243,9 @@ class RAGPipeline:
         Returns:
             پاسخ تولید شده توسط LLM
         """
-        system_prompt = """شما یک دستیار هوشمند فارسی‌زبان هستید.
-به سوالات عمومی کاربر پاسخ دهید.
-
-قوانین مهم:
-1. هرگز نام مدل یا شرکت سازنده خود را فاش نکنید
-2. هرگز به تاریخ آموزش یا محدودیت‌های دانش خود اشاره نکنید
-3. خود را "دستیار هوشمند" معرفی کنید
-4. پاسخ‌ها باید مختصر، مفید و دوستانه باشند
-5. اگر سوال خارج از توانایی شماست، مودبانه بگویید که نمی‌توانید کمک کنید"""
+        from app.config.prompts import SystemPrompts
+        
+        system_prompt = SystemPrompts.get_general_question_prompt()
 
         messages = [
             Message(role="system", content=system_prompt),

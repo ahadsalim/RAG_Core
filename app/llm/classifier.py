@@ -24,7 +24,6 @@ class QueryCategory(BaseModel):
     category: str  # "invalid_no_file", "invalid_with_file", "general_no_business", "business_no_file", "business_with_file"
     confidence: float  # 0.0 to 1.0
     direct_response: Optional[str] = None  # پاسخ مستقیم برای موارد غیر سوالی
-    reason: Optional[str] = None  # دلیل دسته‌بندی
     has_meaningful_files: Optional[bool] = None  # آیا فایل‌ها معنادار هستند؟
     needs_clarification: bool = False  # آیا نیاز به توضیح بیشتر دارد؟
 
@@ -129,7 +128,6 @@ class QueryClassifier:
             return QueryCategory(
                 category="business_no_file",
                 confidence=0.5,
-                reason=f"Classification failed: {str(e)}",
                 needs_clarification=False
             )
     
@@ -272,7 +270,6 @@ class QueryClassifier:
   "category": "invalid_no_file | invalid_with_file | general_no_business | business_no_file | business_with_file",
   "confidence": 0.0-1.0,
   "direct_response": "متن پاسخ یا null",
-  "reason": "دلیل کوتاه و منطقی شامل اشاره به فایل یا context",
   "has_meaningful_files": true/false/null,
   "needs_clarification": true/false
 }
@@ -284,43 +281,43 @@ class QueryClassifier:
 ورودی: "asdfgh"
 فایل: ندارد
 خروجی:
-{"category": "invalid_no_file", "confidence": 0.95, "direct_response": "با کمال میل کمکتان می‌کنم! لطفاً سوال خود را واضح‌تر بیان کنید.", "reason": "کاراکترهای بی‌معنی", "has_meaningful_files": null, "needs_clarification": true}
+{"category": "invalid_no_file", "confidence": 0.95, "direct_response": "با کمال میل کمکتان می‌کنم! لطفاً سوال خود را واضح‌تر بیان کنید.", "has_meaningful_files": null, "needs_clarification": true}
 
 **مثال 2 - invalid_with_file:**
 ورودی: "بررسی کن"
 فایل: دارد - تحلیل: "قرارداد کار"
 خروجی:
-{"category": "invalid_with_file", "confidence": 0.90, "direct_response": "فایل شما یک قرارداد کار است. چه جنبه‌ای را می‌خواهید بررسی کنم؟", "reason": "متن مبهم با فایل معنادار", "has_meaningful_files": true, "needs_clarification": true}
+{"category": "invalid_with_file", "confidence": 0.90, "direct_response": "فایل شما یک قرارداد کار است. چه جنبه‌ای را می‌خواهید بررسی کنم؟", "has_meaningful_files": true, "needs_clarification": true}
 
 **مثال 3 - general_no_business:**
 ورودی: "سلام، یک جوک بگو"
 فایل: ندارد
 خروجی:
-{"category": "general_no_business", "confidence": 0.98, "direct_response": null, "reason": "درخواست جوک - عمومی", "has_meaningful_files": null, "needs_clarification": false}
+{"category": "general_no_business", "confidence": 0.98, "direct_response": null, "has_meaningful_files": null, "needs_clarification": false}
 
 **مثال 4 - business_no_file:**
 ورودی: "قانون کار در مورد اخراج چه می‌گوید؟"
 فایل: ندارد
 خروجی:
-{"category": "business_no_file", "confidence": 0.98, "direct_response": null, "reason": "سوال حقوقی درباره قانون کار", "has_meaningful_files": null, "needs_clarification": false}
+{"category": "business_no_file", "confidence": 0.98, "direct_response": null, "has_meaningful_files": null, "needs_clarification": false}
 
 **مثال 5 - business_with_file:**
 ورودی: "این قرارداد را بررسی کن"
 فایل: دارد - تحلیل: "قرارداد خرید ملک"
 خروجی:
-{"category": "business_with_file", "confidence": 0.95, "direct_response": null, "reason": "درخواست بررسی قرارداد با فایل", "has_meaningful_files": true, "needs_clarification": false}
+{"category": "business_with_file", "confidence": 0.95, "direct_response": null, "has_meaningful_files": true, "needs_clarification": false}
 
 **مثال 6 - درخواست نوشتن سند:**
 ورودی: "لایحه برای دارایی بنویس"
 فایل: ندارد
 خروجی:
-{"category": "business_no_file", "confidence": 0.92, "direct_response": null, "reason": "درخواست نوشتن لایحه - تخصصی", "has_meaningful_files": null, "needs_clarification": false}
+{"category": "business_no_file", "confidence": 0.92, "direct_response": null, "has_meaningful_files": null, "needs_clarification": false}
 
 **مثال 7 - follow-up:**
 ورودی: "چرا؟"
 Context: "کاربر قبلاً درباره مالیات پرسیده"
 خروجی:
-{"category": "business_no_file", "confidence": 0.88, "direct_response": null, "reason": "follow-up به سوال مالیاتی", "has_meaningful_files": null, "needs_clarification": false}
+{"category": "business_no_file", "confidence": 0.88, "direct_response": null, "has_meaningful_files": null, "needs_clarification": false}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 **فقط JSON خالص برگردان.**"""
@@ -374,7 +371,6 @@ Return JSON only (no markdown):
   "category": "invalid_no_file | invalid_with_file | general_no_business | business_no_file | business_with_file",
   "confidence": 0.0-1.0,
   "direct_response": "Response string or null",
-  "reason": "Why this category?",
   "has_meaningful_files": true/false/null,
   "needs_clarification": true/false
 }"""
@@ -399,7 +395,6 @@ Return JSON only (no markdown):
                 category=data.get("category", "business_no_file"),
                 confidence=float(data.get("confidence", 0.5)),
                 direct_response=data.get("direct_response"),
-                reason=data.get("reason"),
                 has_meaningful_files=data.get("has_meaningful_files"),
                 needs_clarification=data.get("needs_clarification", False)
             )
@@ -416,7 +411,6 @@ Return JSON only (no markdown):
                     category="invalid_no_file",
                     confidence=0.7,
                     direct_response="متن شما قابل فهم نیست. لطفاً سوال خود را به صورت واضح بپرسید.",
-                    reason="Detected as invalid from response",
                     needs_clarification=True
                 )
             
@@ -424,6 +418,5 @@ Return JSON only (no markdown):
             return QueryCategory(
                 category="business_no_file",
                 confidence=0.5,
-                reason="Failed to parse, defaulting to business_no_file",
                 needs_clarification=False
             )

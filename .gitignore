@@ -33,3 +33,5 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+tests/test_class.py

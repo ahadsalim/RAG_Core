@@ -121,11 +121,15 @@ class FileAnalysisService:
                 )
             ]
             
-            response = await self.llm.generate(messages)
+            # استفاده از Responses API برای تحلیل فایل
+            response = await self.llm.generate_responses_api(
+                messages, 
+                reasoning_effort="medium"
+            )
             analysis = response.content  # Extract content from LLMResponse
             
             logger.info(
-                "Files analyzed",
+                "Files analyzed (Responses API)",
                 file_count=len(files_content),
                 analysis_length=len(analysis)
             )
@@ -191,11 +195,15 @@ class FileAnalysisService:
                 )
             ]
             
-            response = await self.llm.generate(messages)
+            # استفاده از Responses API برای تحلیل تصویر
+            response = await self.llm.generate_responses_api(
+                messages,
+                reasoning_effort="medium"
+            )
             analysis = response.content  # Extract content from LLMResponse
             
             logger.info(
-                "Image analyzed with vision",
+                "Image analyzed with vision (Responses API)",
                 filename=filename,
                 analysis_length=len(analysis)
             )

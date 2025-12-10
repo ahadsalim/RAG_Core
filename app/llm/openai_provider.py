@@ -1,13 +1,14 @@
 """
 OpenAI-Compatible LLM Provider
 Implementation for any OpenAI-compatible API (OpenAI, Groq, Together.ai, etc.)
+Supports both Chat Completions API and Responses API
 """
 
 from typing import List, Dict, Any, Optional, AsyncGenerator
 import asyncio
 
 import openai
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
 import tiktoken
 import structlog
 
@@ -15,6 +16,46 @@ from app.llm.base import BaseLLM, LLMConfig, Message, LLMResponse
 from app.config.settings import settings
 
 logger = structlog.get_logger()
+
+
+def extract_responses_api_text(response) -> str:
+    """Extract text from Responses API response"""
+    # Method 1: output_text (direct attribute) - PREFERRED
+    if hasattr(response, 'output_text') and response.output_text:
+        return response.output_text
+    
+    # Method 2: output -> content -> text
+    if hasattr(response, 'output') and response.output:
+        for output_item in response.output:
+            if hasattr(output_item, 'content') and output_item.content:
+                for content_item in output_item.content:
+                    if hasattr(content_item, 'text') and content_item.text:
+                        return content_item.text
+    
+    # Method 3: Check if output is a list of message objects
+    if hasattr(response, 'output') and response.output:
+        for item in response.output:
+            if hasattr(item, 'text') and item.text:
+                return item.text
+            if hasattr(item, 'type') and item.type == 'message':
+                if hasattr(item, 'content') and item.content:
+                    for c in item.content:
+                        if hasattr(c, 'text'):
+                            return c.text
+    
+    return ""
+
+
+def extract_responses_api_tokens(response) -> tuple:
+    """Extract token counts from Responses API response"""
+    input_tokens = 0
+    output_tokens = 0
+    
+    if hasattr(response, 'usage') and response.usage:
+        input_tokens = getattr(response.usage, 'input_tokens', 0) or 0
+        output_tokens = getattr(response.usage, 'output_tokens', 0) or 0
+    
+    return input_tokens, output_tokens
 
 
 class OpenAIProvider(BaseLLM):
@@ -41,6 +82,8 @@ class OpenAIProvider(BaseLLM):
             logger.info(f"Using custom base URL: {client_kwargs['base_url']}")
         
         self.client = AsyncOpenAI(**client_kwargs)
+        # Sync client for Responses API (which doesn't have async version yet)
+        self.sync_client = OpenAI(**client_kwargs)
         
         # Initialize tokenizer
         try:
@@ -201,6 +244,80 @@ class OpenAIProvider(BaseLLM):
             logger.error(f"Token counting failed: {e}")
             # Fallback to approximation
             return len(text) // 4
+    
+    async def generate_responses_api(
+        self,
+        messages: List[Message],
+        reasoning_effort: str = "low",
+        **kwargs
+    ) -> LLMResponse:
+        """
+        Generate a response using OpenAI Responses API.
+        This is the newer API that supports reasoning models.
+        
+        Args:
+            messages: List of messages (will be converted to input format)
+            reasoning_effort: "low", "medium", or "high"
+            **kwargs: Additional parameters
+        
+        Returns:
+            LLMResponse with content and usage info
+        """
+        try:
+            # Convert messages to input format for Responses API
+            # Responses API uses a single input string or structured input
+            formatted_messages = self.prepare_messages(messages)
+            
+            # Build input content
+            input_parts = []
+            for msg in formatted_messages:
+                role = msg["role"]
+                content = msg["content"]
+                if role == "system":
+                    input_parts.append(content)
+                elif role == "user":
+                    input_parts.append(f"\n---\n\n{content}")
+                elif role == "assistant":
+                    input_parts.append(f"\n[Assistant]: {content}")
+            
+            full_input = "\n".join(input_parts)
+            
+            max_tokens_value = kwargs.get("max_tokens", self.config.max_tokens)
+            
+            # Run sync client in thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.sync_client.responses.create(
+                    model=self.config.model,
+                    input=full_input,
+                    reasoning={"effort": reasoning_effort},
+                    max_output_tokens=max_tokens_value,
+                )
+            )
+            
+            # Extract response text
+            content = extract_responses_api_text(response)
+            input_tokens, output_tokens = extract_responses_api_tokens(response)
+            
+            return LLMResponse(
+                content=content,
+                model=self.config.model,
+                usage={
+                    "prompt_tokens": input_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                },
+                finish_reason="stop",
+                metadata={
+                    "api_type": "responses",
+                    "reasoning_effort": reasoning_effort,
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"OpenAI Responses API failed: {e}")
+            raise
 
 
 # NOTE: OpenAIEmbedding class has been removed.

@@ -35,4 +35,3 @@ build/
 Thumbs.db
 
 test/test_class.py
-test/test_class2.py

@@ -1,17 +1,260 @@
 """
 File Analysis Service with LLM
 تحلیل فایل‌های ضمیمه شده با استفاده از LLM
+پشتیبانی از استخراج متن با OCR برای فایل‌های PDF و DOCX
 """
 
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import base64
+import io
 import structlog
+import requests
 
 from app.llm.base import LLMConfig, LLMProvider, Message
 from app.llm.openai_provider import OpenAIProvider
 from app.config.settings import settings
 
 logger = structlog.get_logger()
+
+# ============================================================================
+# File Type Detection
+# ============================================================================
+
+# Image extensions
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.ico'}
+
+# Text file extensions (can be extracted locally)
+TEXT_FILE_EXTENSIONS = {'.pdf', '.txt', '.doc', '.docx', '.html', '.htm', '.rtf', '.md', '.csv', '.json', '.xml'}
+
+
+def get_file_extension(url_or_filename: str) -> str:
+    """Extract file extension from URL or filename"""
+    import os
+    from urllib.parse import urlparse, unquote
+    
+    # Parse URL and get path
+    parsed = urlparse(url_or_filename)
+    path = unquote(parsed.path)
+    
+    # Get extension
+    _, ext = os.path.splitext(path)
+    return ext.lower()
+
+
+def is_image_file(url_or_filename: str) -> bool:
+    """Check if file is an image"""
+    ext = get_file_extension(url_or_filename)
+    return ext in IMAGE_EXTENSIONS
+
+
+def is_text_file(url_or_filename: str) -> bool:
+    """Check if file is a text-based file that can be extracted locally"""
+    ext = get_file_extension(url_or_filename)
+    return ext in TEXT_FILE_EXTENSIONS
+
+
+# ============================================================================
+# Local Text Extraction with OCR Support
+# ============================================================================
+
+# Try importing optional libraries
+try:
+    from PyPDF2 import PdfReader
+    HAS_PDF = True
+except ImportError:
+    HAS_PDF = False
+
+try:
+    from docx import Document
+    HAS_DOCX = True
+except ImportError:
+    HAS_DOCX = False
+
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
+
+try:
+    import pytesseract
+    from PIL import Image
+    HAS_OCR = True
+except ImportError:
+    HAS_OCR = False
+
+try:
+    import fitz  # PyMuPDF for PDF images
+    HAS_PYMUPDF = True
+except ImportError:
+    HAS_PYMUPDF = False
+
+
+def extract_text_from_pdf(content: bytes) -> str:
+    """Extract text from PDF content with OCR support for images"""
+    text_parts = []
+    
+    # Method 1: Try PyMuPDF (better for images)
+    if HAS_PYMUPDF:
+        try:
+            doc = fitz.open(stream=content, filetype="pdf")
+            for page_num, page in enumerate(doc):
+                # Extract text
+                page_text = page.get_text()
+                if page_text.strip():
+                    text_parts.append(page_text)
+                
+                # Extract images and OCR them
+                if HAS_OCR:
+                    image_list = page.get_images()
+                    for img_index, img in enumerate(image_list):
+                        try:
+                            xref = img[0]
+                            base_image = doc.extract_image(xref)
+                            image_bytes = base_image["image"]
+                            
+                            # OCR the image
+                            pil_image = Image.open(io.BytesIO(image_bytes))
+                            ocr_text = pytesseract.image_to_string(pil_image, lang='fas+eng')
+                            if ocr_text.strip():
+                                text_parts.append(f"\n[متن استخراج شده از تصویر صفحه {page_num + 1}]:\n{ocr_text}")
+                        except:
+                            continue
+            doc.close()
+            
+            if text_parts:
+                return "\n".join(text_parts).strip()
+        except Exception as e:
+            logger.warning(f"PyMuPDF extraction failed: {e}")
+    
+    # Method 2: Fall back to PyPDF2
+    if HAS_PDF:
+        try:
+            reader = PdfReader(io.BytesIO(content))
+            for page in reader.pages:
+                page_text = page.extract_text() or ""
+                if page_text.strip():
+                    text_parts.append(page_text)
+            
+            if text_parts:
+                return "\n".join(text_parts).strip()
+        except Exception as e:
+            return f"[خطا در خواندن PDF: {e}]"
+    
+    if not HAS_PDF and not HAS_PYMUPDF:
+        return "[خطا: کتابخانه PyPDF2 یا PyMuPDF نصب نیست]"
+    
+    return "[فایل PDF بدون متن قابل استخراج]"
+
+
+def extract_text_from_txt(content: bytes) -> str:
+    """Extract text from TXT content"""
+    try:
+        # Try different encodings
+        for encoding in ['utf-8', 'utf-16', 'cp1256', 'iso-8859-1']:
+            try:
+                return content.decode(encoding)
+            except:
+                continue
+        return content.decode('utf-8', errors='ignore')
+    except Exception as e:
+        return f"[خطا در خواندن TXT: {e}]"
+
+
+def extract_text_from_docx(content: bytes) -> str:
+    """Extract text from DOCX content with OCR support for images"""
+    if not HAS_DOCX:
+        return "[خطا: کتابخانه python-docx نصب نیست]"
+    try:
+        doc = Document(io.BytesIO(content))
+        text_parts = []
+        
+        # Extract text from paragraphs
+        for para in doc.paragraphs:
+            if para.text.strip():
+                text_parts.append(para.text)
+        
+        # Extract text from tables
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = " | ".join([cell.text.strip() for cell in row.cells if cell.text.strip()])
+                if row_text:
+                    text_parts.append(row_text)
+        
+        # Extract images and OCR them
+        if HAS_OCR:
+            import zipfile
+            with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                for file_name in zf.namelist():
+                    if file_name.startswith('word/media/') and file_name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
+                        try:
+                            image_data = zf.read(file_name)
+                            pil_image = Image.open(io.BytesIO(image_data))
+                            ocr_text = pytesseract.image_to_string(pil_image, lang='fas+eng')
+                            if ocr_text.strip():
+                                text_parts.append(f"\n[متن استخراج شده از تصویر]:\n{ocr_text}")
+                        except:
+                            continue
+        
+        return "\n".join(text_parts).strip() if text_parts else "[فایل DOCX بدون متن]"
+    except Exception as e:
+        return f"[خطا در خواندن DOCX: {e}]"
+
+
+def extract_text_from_html(content: bytes) -> str:
+    """Extract text from HTML content"""
+    if not HAS_BS4:
+        return "[خطا: کتابخانه beautifulsoup4 نصب نیست]"
+    try:
+        soup = BeautifulSoup(content, 'html.parser')
+        # Remove script and style elements
+        for script in soup(["script", "style"]):
+            script.decompose()
+        text = soup.get_text(separator='\n', strip=True)
+        return text if text else "[فایل HTML بدون متن]"
+    except Exception as e:
+        return f"[خطا در خواندن HTML: {e}]"
+
+
+def extract_text_from_file(content: bytes, extension: str) -> Tuple[str, str]:
+    """
+    Extract text from file based on extension.
+    Returns: (text_content, error_message)
+    """
+    try:
+        if extension == '.pdf':
+            text = extract_text_from_pdf(content)
+        elif extension == '.txt' or extension == '.md' or extension == '.csv' or extension == '.json' or extension == '.xml':
+            text = extract_text_from_txt(content)
+        elif extension in ['.doc', '.docx']:
+            text = extract_text_from_docx(content)
+        elif extension in ['.html', '.htm']:
+            text = extract_text_from_html(content)
+        else:
+            return "", f"فرمت {extension} پشتیبانی نمی‌شود"
+        
+        # Limit text length to avoid token overflow
+        max_chars = 15000
+        if len(text) > max_chars:
+            text = text[:max_chars] + "\n\n... [متن ادامه دارد - برش خورده]"
+        
+        return text, ""
+        
+    except Exception as e:
+        return "", f"خطا در پردازش فایل: {e}"
+
+
+async def download_file_content(url: str) -> bytes:
+    """Download file content from URL"""
+    import asyncio
+    
+    def _download():
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        return response.content
+    
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _download)
 
 
 class FileAnalysisService:
@@ -30,6 +273,142 @@ class FileAnalysisService:
         self.llm = OpenAIProvider(self.llm_config)
         logger.info("FileAnalysisService initialized")
     
+    async def analyze_file_from_url(
+        self,
+        file_url: str,
+        filename: str,
+        user_query: str,
+        language: str = "fa"
+    ) -> str:
+        """
+        تحلیل یک فایل از URL با تشخیص خودکار نوع فایل
+        
+        اگر فایل تصویر باشد → مستقیم به مدل ارسال می‌شود
+        اگر فایل متنی باشد → ابتدا متن استخراج شده و سپس به مدل ارسال می‌شود
+        
+        Args:
+            file_url: آدرس فایل
+            filename: نام فایل
+            user_query: سوال کاربر
+            language: زبان
+            
+        Returns:
+            تحلیل فایل
+        """
+        try:
+            # تشخیص نوع فایل
+            if is_image_file(filename) or is_image_file(file_url):
+                # فایل تصویر → ارسال مستقیم به مدل با Vision
+                logger.info(f"Image file detected: {filename}, sending to vision model")
+                return await self._analyze_image_from_url(file_url, filename, user_query, language)
+            
+            elif is_text_file(filename) or is_text_file(file_url):
+                # فایل متنی → استخراج متن و ارسال به مدل
+                logger.info(f"Text file detected: {filename}, extracting text locally")
+                return await self._analyze_text_file_from_url(file_url, filename, user_query, language)
+            
+            else:
+                # نوع ناشناخته → تلاش برای استخراج متن
+                logger.warning(f"Unknown file type: {filename}, trying text extraction")
+                return await self._analyze_text_file_from_url(file_url, filename, user_query, language)
+                
+        except Exception as e:
+            logger.error(f"Failed to analyze file {filename}: {e}")
+            return f"خطا در تحلیل فایل {filename}: {str(e)}"
+    
+    async def _analyze_image_from_url(
+        self,
+        file_url: str,
+        filename: str,
+        user_query: str,
+        language: str = "fa"
+    ) -> str:
+        """تحلیل تصویر با ارسال مستقیم URL به مدل"""
+        try:
+            from app.config.prompts import FileAnalysisPrompts
+            
+            system_prompt = FileAnalysisPrompts.get_analysis_prompt()
+            user_text = FileAnalysisPrompts.get_analysis_user_text()
+            
+            # ارسال تصویر به مدل با Responses API
+            messages = [
+                Message(
+                    role="user",
+                    content=[
+                        {
+                            "type": "input_text",
+                            "text": f"{system_prompt}\n\n---\n\n{user_text}\n\nسوال کاربر: {user_query}"
+                        },
+                        {
+                            "type": "input_image",
+                            "image_url": file_url
+                        }
+                    ]
+                )
+            ]
+            
+            response = await self.llm.generate_responses_api(
+                messages,
+                reasoning_effort="high"
+            )
+            
+            logger.info(f"Image analyzed: {filename}", analysis_length=len(response.content))
+            return response.content.strip()
+            
+        except Exception as e:
+            logger.error(f"Failed to analyze image {filename}: {e}")
+            return f"خطا در تحلیل تصویر {filename}"
+    
+    async def _analyze_text_file_from_url(
+        self,
+        file_url: str,
+        filename: str,
+        user_query: str,
+        language: str = "fa"
+    ) -> str:
+        """تحلیل فایل متنی با استخراج محلی متن"""
+        try:
+            from app.config.prompts import FileAnalysisPrompts
+            
+            # دانلود فایل
+            logger.info(f"Downloading file: {filename}")
+            file_content = await download_file_content(file_url)
+            logger.info(f"File downloaded: {len(file_content)} bytes")
+            
+            # استخراج متن
+            extension = get_file_extension(filename) or get_file_extension(file_url)
+            extracted_text, error = extract_text_from_file(file_content, extension)
+            
+            if error:
+                logger.warning(f"Text extraction error: {error}")
+                return f"خطا در استخراج متن از فایل: {error}"
+            
+            logger.info(f"Text extracted: {len(extracted_text)} characters")
+            
+            # ارسال متن به مدل
+            system_prompt = FileAnalysisPrompts.get_analysis_prompt()
+            user_text = FileAnalysisPrompts.get_analysis_user_text()
+            
+            messages = [
+                Message(role="system", content=system_prompt),
+                Message(
+                    role="user",
+                    content=f"{user_text}\n\nسوال کاربر: {user_query}\n\n**محتوای فایل ({filename}):**\n{extracted_text}"
+                )
+            ]
+            
+            response = await self.llm.generate_responses_api(
+                messages,
+                reasoning_effort="high"
+            )
+            
+            logger.info(f"Text file analyzed: {filename}", analysis_length=len(response.content))
+            return response.content.strip()
+            
+        except Exception as e:
+            logger.error(f"Failed to analyze text file {filename}: {e}")
+            return f"خطا در تحلیل فایل {filename}"
+    
     async def analyze_file(
         self,
         file_url: str,
@@ -39,7 +418,7 @@ class FileAnalysisService:
         language: str = "fa"
     ) -> str:
         """
-        تحلیل یک فایل منفرد با LLM
+        تحلیل یک فایل منفرد با LLM (متد قدیمی برای سازگاری)
         
         Args:
             file_url: آدرس فایل در MinIO
@@ -51,34 +430,8 @@ class FileAnalysisService:
         Returns:
             تحلیل فایل
         """
-        try:
-            from app.services.storage_service import get_storage_service
-            from app.services.file_processing_service import get_file_processing_service
-            
-            # Download file
-            storage_service = get_storage_service()
-            file_data = await storage_service.download_temp_file(file_url)
-            
-            # Extract text
-            file_processor = get_file_processing_service()
-            processing_result = await file_processor.process_file(
-                file_data, filename, file_type
-            )
-            
-            # Prepare content
-            file_content = [{
-                'filename': filename,
-                'file_type': file_type,
-                'content': processing_result.get('text', ''),
-                'is_image': file_type.startswith('image/')
-            }]
-            
-            # Analyze with LLM
-            return await self.analyze_files(file_content, user_query, language)
-            
-        except Exception as e:
-            logger.error(f"Failed to analyze file {filename}: {e}")
-            return f"خطا در تحلیل فایل {filename}"
+        # استفاده از متد جدید
+        return await self.analyze_file_from_url(file_url, filename, user_query, language)
     
     async def analyze_files(
         self,

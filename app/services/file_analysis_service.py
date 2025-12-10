@@ -20,11 +20,11 @@ logger = structlog.get_logger()
 # File Type Detection
 # ============================================================================
 
-# Image extensions
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.ico'}
+# Image extensions (supported formats)
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
 
 # Text file extensions (can be extracted locally)
-TEXT_FILE_EXTENSIONS = {'.pdf', '.txt', '.doc', '.docx', '.html', '.htm', '.rtf', '.md', '.csv', '.json', '.xml'}
+TEXT_FILE_EXTENSIONS = {'.pdf', '.txt', '.doc', '.docx', '.html', '.htm'}
 
 
 def get_file_extension(url_or_filename: str) -> str:

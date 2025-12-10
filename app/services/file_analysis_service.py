@@ -276,162 +276,128 @@ class FileAnalysisService:
     async def analyze_file_from_url(
         self,
         file_url: str,
-        filename: str,
-        user_query: str,
-        language: str = "fa"
-    ) -> str:
+        user_query: str = ""
+    ) -> Dict[str, Any]:
         """
-        تحلیل یک فایل از URL با تشخیص خودکار نوع فایل
+        تحلیل فایل از URL - دقیقاً مطابق فایل تست
         
-        اگر فایل تصویر باشد → مستقیم به مدل ارسال می‌شود
+        اگر فایل تصویر باشد → مستقیم به مدل ارسال می‌شود (input_image)
         اگر فایل متنی باشد → ابتدا متن استخراج شده و سپس به مدل ارسال می‌شود
         
         Args:
             file_url: آدرس فایل
-            filename: نام فایل
-            user_query: سوال کاربر
-            language: زبان
+            user_query: سوال کاربر (اختیاری)
             
         Returns:
-            تحلیل فایل
+            dict با کلیدهای answer, input_tokens, output_tokens یا error
         """
+        from app.config.prompts import FileAnalysisPrompts
+        
+        ANALYSIS_PROMPT = FileAnalysisPrompts.get_analysis_prompt()
+        ANALYSIS_USER_TEXT = FileAnalysisPrompts.get_analysis_user_text()
+        MAX_TOKENS_RESPONSE = 8192
+        
         try:
             # تشخیص نوع فایل
-            if is_image_file(filename) or is_image_file(file_url):
-                # فایل تصویر → ارسال مستقیم به مدل با Vision
-                logger.info(f"Image file detected: {filename}, sending to vision model")
-                return await self._analyze_image_from_url(file_url, filename, user_query, language)
+            if is_image_file(file_url):
+                # Image file - use input_image (مانند فایل تست)
+                logger.info(f"Image file detected, sending to vision model: {file_url}")
+                
+                input_content = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": f"{ANALYSIS_PROMPT}\n\n---\n\n{ANALYSIS_USER_TEXT}"},
+                            {"type": "input_image", "image_url": file_url}
+                        ]
+                    }
+                ]
+                
+                response = await self.llm.generate_responses_api(
+                    messages=[],  # خالی چون از input_content استفاده می‌کنیم
+                    reasoning_effort="high",
+                    input_content=input_content,
+                    max_tokens=MAX_TOKENS_RESPONSE
+                )
+                
+                logger.info(f"Image analyzed", analysis_length=len(response.content))
+                return {
+                    "answer": response.content.strip(),
+                    "input_tokens": response.usage.get("prompt_tokens", 0),
+                    "output_tokens": response.usage.get("completion_tokens", 0)
+                }
             
-            elif is_text_file(filename) or is_text_file(file_url):
-                # فایل متنی → استخراج متن و ارسال به مدل
-                logger.info(f"Text file detected: {filename}, extracting text locally")
-                return await self._analyze_text_file_from_url(file_url, filename, user_query, language)
+            elif is_text_file(file_url):
+                # Text file - extract content locally with OCR support (مانند فایل تست)
+                logger.info(f"Text file detected, extracting text locally: {file_url}")
+                
+                # دانلود فایل
+                file_content = await download_file_content(file_url)
+                logger.info(f"File downloaded: {len(file_content)} bytes")
+                
+                # استخراج متن
+                extension = get_file_extension(file_url)
+                extracted_text, error = extract_text_from_file(file_content, extension)
+                
+                if error:
+                    logger.warning(f"Text extraction error: {error}")
+                    return {"error": f"خطا در استخراج محتوا: {error}"}
+                
+                logger.info(f"Text extracted: {len(extracted_text)} characters")
+                
+                # ارسال متن به مدل (مانند فایل تست)
+                input_content = f"{ANALYSIS_PROMPT}\n\n---\n\n{ANALYSIS_USER_TEXT}\n\n**محتوای فایل:**\n{extracted_text}"
+                
+                response = await self.llm.generate_responses_api(
+                    messages=[],
+                    reasoning_effort="high",
+                    input_content=input_content,
+                    max_tokens=MAX_TOKENS_RESPONSE
+                )
+                
+                logger.info(f"Text file analyzed", analysis_length=len(response.content))
+                return {
+                    "answer": response.content.strip(),
+                    "input_tokens": response.usage.get("prompt_tokens", 0),
+                    "output_tokens": response.usage.get("completion_tokens", 0)
+                }
             
             else:
-                # نوع ناشناخته → تلاش برای استخراج متن
-                logger.warning(f"Unknown file type: {filename}, trying text extraction")
-                return await self._analyze_text_file_from_url(file_url, filename, user_query, language)
-                
+                return {"error": "فرمت فایل پشتیبانی نمی‌شود"}
+        
         except Exception as e:
-            logger.error(f"Failed to analyze file {filename}: {e}")
-            return f"خطا در تحلیل فایل {filename}: {str(e)}"
-    
-    async def _analyze_image_from_url(
-        self,
-        file_url: str,
-        filename: str,
-        user_query: str,
-        language: str = "fa"
-    ) -> str:
-        """تحلیل تصویر با ارسال مستقیم URL به مدل"""
-        try:
-            from app.config.prompts import FileAnalysisPrompts
-            
-            system_prompt = FileAnalysisPrompts.get_analysis_prompt()
-            user_text = FileAnalysisPrompts.get_analysis_user_text()
-            
-            # ارسال تصویر به مدل با Responses API
-            messages = [
-                Message(
-                    role="user",
-                    content=[
-                        {
-                            "type": "input_text",
-                            "text": f"{system_prompt}\n\n---\n\n{user_text}\n\nسوال کاربر: {user_query}"
-                        },
-                        {
-                            "type": "input_image",
-                            "image_url": file_url
-                        }
-                    ]
-                )
-            ]
-            
-            response = await self.llm.generate_responses_api(
-                messages,
-                reasoning_effort="high"
-            )
-            
-            logger.info(f"Image analyzed: {filename}", analysis_length=len(response.content))
-            return response.content.strip()
-            
-        except Exception as e:
-            logger.error(f"Failed to analyze image {filename}: {e}")
-            return f"خطا در تحلیل تصویر {filename}"
-    
-    async def _analyze_text_file_from_url(
-        self,
-        file_url: str,
-        filename: str,
-        user_query: str,
-        language: str = "fa"
-    ) -> str:
-        """تحلیل فایل متنی با استخراج محلی متن"""
-        try:
-            from app.config.prompts import FileAnalysisPrompts
-            
-            # دانلود فایل
-            logger.info(f"Downloading file: {filename}")
-            file_content = await download_file_content(file_url)
-            logger.info(f"File downloaded: {len(file_content)} bytes")
-            
-            # استخراج متن
-            extension = get_file_extension(filename) or get_file_extension(file_url)
-            extracted_text, error = extract_text_from_file(file_content, extension)
-            
-            if error:
-                logger.warning(f"Text extraction error: {error}")
-                return f"خطا در استخراج متن از فایل: {error}"
-            
-            logger.info(f"Text extracted: {len(extracted_text)} characters")
-            
-            # ارسال متن به مدل
-            system_prompt = FileAnalysisPrompts.get_analysis_prompt()
-            user_text = FileAnalysisPrompts.get_analysis_user_text()
-            
-            messages = [
-                Message(role="system", content=system_prompt),
-                Message(
-                    role="user",
-                    content=f"{user_text}\n\nسوال کاربر: {user_query}\n\n**محتوای فایل ({filename}):**\n{extracted_text}"
-                )
-            ]
-            
-            response = await self.llm.generate_responses_api(
-                messages,
-                reasoning_effort="high"
-            )
-            
-            logger.info(f"Text file analyzed: {filename}", analysis_length=len(response.content))
-            return response.content.strip()
-            
-        except Exception as e:
-            logger.error(f"Failed to analyze text file {filename}: {e}")
-            return f"خطا در تحلیل فایل {filename}"
+            import traceback
+            logger.error(f"Failed to analyze file: {e}")
+            return {"error": str(e), "traceback": traceback.format_exc()}
     
     async def analyze_file(
         self,
         file_url: str,
-        filename: str,
-        file_type: str,
-        user_query: str,
+        filename: str = "",
+        file_type: str = "",
+        user_query: str = "",
         language: str = "fa"
     ) -> str:
         """
         تحلیل یک فایل منفرد با LLM (متد قدیمی برای سازگاری)
         
         Args:
-            file_url: آدرس فایل در MinIO
-            filename: نام فایل
-            file_type: نوع فایل (MIME type)
-            user_query: سوال کاربر
+            file_url: آدرس فایل
+            filename: نام فایل (اختیاری)
+            file_type: نوع فایل (اختیاری)
+            user_query: سوال کاربر (اختیاری)
             language: زبان
             
         Returns:
-            تحلیل فایل
+            تحلیل فایل (متن)
         """
         # استفاده از متد جدید
-        return await self.analyze_file_from_url(file_url, filename, user_query, language)
+        result = await self.analyze_file_from_url(file_url, user_query)
+        
+        # برگرداندن فقط متن پاسخ برای سازگاری
+        if "error" in result:
+            return f"خطا در تحلیل فایل: {result['error']}"
+        return result.get("answer", "")
     
     async def analyze_files(
         self,

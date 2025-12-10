@@ -211,31 +211,34 @@ class OpenAIProvider(BaseLLM):
         Args:
             messages: List of messages (will be converted to input format)
             reasoning_effort: "low", "medium", or "high"
-            **kwargs: Additional parameters
+            **kwargs: Additional parameters (input_content for direct input)
         
         Returns:
             LLMResponse with content and usage info
         """
         try:
-            # Convert messages to input format for Responses API
-            # Responses API uses a single input string or structured input
-            formatted_messages = self.prepare_messages(messages)
-            
-            # Build input content
-            input_parts = []
-            for msg in formatted_messages:
-                role = msg["role"]
-                content = msg["content"]
-                if role == "system":
-                    input_parts.append(content)
-                elif role == "user":
-                    input_parts.append(f"\n---\n\n{content}")
-                elif role == "assistant":
-                    input_parts.append(f"\n[Assistant]: {content}")
-            
-            full_input = "\n".join(input_parts)
-            
             max_tokens_value = kwargs.get("max_tokens", self.config.max_tokens)
+            
+            # اگر input_content مستقیم داده شده، از آن استفاده کن (مانند فایل تست)
+            if "input_content" in kwargs:
+                input_content = kwargs["input_content"]
+            else:
+                # Convert messages to input format for Responses API
+                formatted_messages = self.prepare_messages(messages)
+                
+                # Build input content
+                input_parts = []
+                for msg in formatted_messages:
+                    role = msg["role"]
+                    content = msg["content"]
+                    if role == "system":
+                        input_parts.append(content)
+                    elif role == "user":
+                        input_parts.append(f"\n---\n\n{content}")
+                    elif role == "assistant":
+                        input_parts.append(f"\n[Assistant]: {content}")
+                
+                input_content = "\n".join(input_parts)
             
             # Run sync client in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
@@ -243,7 +246,7 @@ class OpenAIProvider(BaseLLM):
                 None,
                 lambda: self.sync_client.responses.create(
                     model=self.config.model,
-                    input=full_input,
+                    input=input_content,
                     reasoning={"effort": reasoning_effort},
                     max_output_tokens=max_tokens_value,
                 )

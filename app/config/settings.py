@@ -250,7 +250,6 @@ class Settings(BaseSettings):
     enable_semantic_cache: bool = Field(default=True)
     enable_audit_log: bool = Field(default=True)
     enable_content_filter: bool = Field(default=True)
-    enable_streaming: bool = Field(default=True)
     
     # Content Filtering
     content_filter_threshold: float = Field(default=0.8, ge=0.0, le=1.0)

@@ -58,7 +58,6 @@ class QueryRequest(BaseModel):
     filters: Optional[Dict[str, Any]] = None
     use_cache: bool = True
     use_reranking: bool = True
-    stream: bool = False
     user_preferences: Optional[Dict[str, Any]] = None
     file_attachments: Optional[List[FileAttachment]] = Field(None, max_items=5)
 
@@ -302,7 +301,11 @@ async def process_query_enhanced(
                     Message(role="user", content=user_message)
                 ]
                 
-                llm_response = await llm.generate(messages)
+                # استفاده از Responses API
+                llm_response = await llm.generate_responses_api(
+                    messages,
+                    reasoning_effort="low"
+                )
                 response_text = llm_response.content
                 
                 # ذخیره در دیتابیس

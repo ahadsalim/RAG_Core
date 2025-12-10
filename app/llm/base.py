@@ -4,7 +4,7 @@ Abstract base class for LLM providers
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import enum
 
@@ -69,24 +69,6 @@ class BaseLLM(ABC):
             
         Returns:
             LLM response
-        """
-        pass
-    
-    @abstractmethod
-    async def generate_stream(
-        self,
-        messages: List[Message],
-        **kwargs
-    ) -> AsyncGenerator[str, None]:
-        """
-        Generate a streaming response from the LLM.
-        
-        Args:
-            messages: List of chat messages
-            **kwargs: Additional parameters
-            
-        Yields:
-            Response chunks
         """
         pass
     

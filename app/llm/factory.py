@@ -104,14 +104,14 @@ class LLMWithFallback:
             else:
                 raise Exception("Primary LLM is down and no fallback configured")
         
-        # تلاش با Primary
+        # تلاش با Primary - استفاده از Responses API
         try:
-            logger.debug(f"Trying primary LLM: {self.primary_config.model}")
+            logger.debug(f"Trying primary LLM (Responses API): {self.primary_config.model}")
             response = await asyncio.wait_for(
-                self.primary_llm.generate(messages),
+                self.primary_llm.generate_responses_api(messages, reasoning_effort="medium"),
                 timeout=timeout
             )
-            logger.info("Primary LLM responded successfully")
+            logger.info("Primary LLM (Responses API) responded successfully")
             return response
         except asyncio.TimeoutError:
             logger.warning(f"Primary LLM timeout ({timeout}s)")
@@ -127,14 +127,14 @@ class LLMWithFallback:
             raise Exception("Primary LLM failed and no fallback configured")
     
     async def _call_fallback(self, messages: List[Message], timeout: float) -> LLMResponse:
-        """فراخوانی Fallback LLM"""
+        """فراخوانی Fallback LLM با Responses API"""
         try:
-            logger.info(f"Trying fallback LLM: {self.fallback_config.model}")
+            logger.info(f"Trying fallback LLM (Responses API): {self.fallback_config.model}")
             response = await asyncio.wait_for(
-                self.fallback_llm.generate(messages),
+                self.fallback_llm.generate_responses_api(messages, reasoning_effort="medium"),
                 timeout=timeout
             )
-            logger.info("Fallback LLM responded successfully")
+            logger.info("Fallback LLM (Responses API) responded successfully")
             return response
         except asyncio.TimeoutError:
             logger.error(f"Fallback LLM timeout ({timeout}s)")
@@ -143,57 +143,6 @@ class LLMWithFallback:
             logger.error(f"Fallback LLM failed: {e}")
             raise Exception(f"Fallback LLM failed: {e}")
     
-    async def generate_stream(self, messages: List[Message]):
-        """
-        Generate streaming response with automatic fallback
-        اگر primary قبلاً down شده، مستقیم از fallback استفاده می‌کند
-        
-        Args:
-            messages: لیست پیام‌ها
-            
-        Yields:
-            chunks از primary یا fallback
-        """
-        # اگر primary قبلاً down شده، مستقیم به fallback برو
-        if is_primary_llm_down():
-            logger.info("Primary LLM is marked as DOWN, using fallback directly for streaming")
-            if self.fallback_llm:
-                async for chunk in self.fallback_llm.generate_stream(messages):
-                    yield chunk
-                logger.info("Fallback LLM stream completed")
-                return
-            else:
-                raise Exception("Primary LLM is down and no fallback configured")
-        
-        # تلاش با Primary
-        try:
-            logger.debug(f"Trying primary LLM stream: {self.primary_config.model}")
-            async for chunk in self.primary_llm.generate_stream(messages):
-                yield chunk
-            logger.info("Primary LLM stream completed")
-            return
-        except asyncio.TimeoutError:
-            logger.warning(f"Primary LLM stream timeout")
-            set_primary_llm_down(True)
-        except Exception as e:
-            logger.warning(f"Primary LLM stream failed: {e}")
-            set_primary_llm_down(True)
-        
-        # تلاش با Fallback
-        if self.fallback_llm:
-            try:
-                logger.info(f"Trying fallback LLM stream: {self.fallback_config.model}")
-                async for chunk in self.fallback_llm.generate_stream(messages):
-                    yield chunk
-                logger.info("Fallback LLM stream completed")
-                return
-            except Exception as e:
-                logger.error(f"Fallback LLM stream failed: {e}")
-                raise Exception(f"Fallback LLM stream failed: {e}")
-        else:
-            raise Exception("Primary LLM stream failed and no fallback configured")
-
-
 def create_llm1_light() -> LLMWithFallback:
     """
     ایجاد LLM1 (Light) برای سوالات ساده

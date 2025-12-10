@@ -242,7 +242,11 @@ class ConversationMemory:
                 Message(role="user", content=conversation_text)
             ]
             
-            response = await self.llm.generate(messages)
+            # استفاده از Responses API
+            response = await self.llm.generate_responses_api(
+                messages,
+                reasoning_effort="low"
+            )
             summary = response.content  # Extract content from LLMResponse
             
             logger.info(

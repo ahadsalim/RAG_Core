@@ -1,10 +1,10 @@
 """
 OpenAI-Compatible LLM Provider
 Implementation for any OpenAI-compatible API (OpenAI, Groq, Together.ai, etc.)
-Supports both Chat Completions API and Responses API
+Uses Responses API for GPT-5 models
 """
 
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List, Dict, Any, Optional
 import asyncio
 
 import openai
@@ -152,53 +152,6 @@ class OpenAIProvider(BaseLLM):
             
         except Exception as e:
             logger.error(f"OpenAI generation failed: {e}")
-            raise
-    
-    async def generate_stream(
-        self,
-        messages: List[Message],
-        **kwargs
-    ) -> AsyncGenerator[str, None]:
-        """Generate a streaming response from OpenAI."""
-        try:
-            # Prepare messages
-            formatted_messages = self.prepare_messages(messages)
-            
-            # Merge kwargs with config
-            max_tokens_value = kwargs.get("max_tokens", self.config.max_tokens)
-            
-            # مدل‌های جدید (gpt-5, o1, o3) محدودیت‌های خاصی دارند
-            is_new_model = any(x in self.config.model for x in ["gpt-5", "o1", "o3"])
-            
-            params = {
-                "model": self.config.model,
-                "messages": formatted_messages,
-                "stream": True,
-            }
-            
-            # مدل‌های جدید از temperature و top_p پشتیبانی نمی‌کنند
-            if not is_new_model:
-                params["temperature"] = kwargs.get("temperature", self.config.temperature)
-                params["top_p"] = kwargs.get("top_p", self.config.top_p)
-            
-            # gpt-5-nano و مدل‌های جدید از max_completion_tokens استفاده می‌کنند
-            if is_new_model:
-                params["max_completion_tokens"] = max_tokens_value
-            else:
-                params["max_tokens"] = max_tokens_value
-            
-            # Call OpenAI API with streaming
-            stream = await self.client.chat.completions.create(**params)
-            
-            async for chunk in stream:
-                # Skip chunks without choices (can happen at end of stream)
-                if not chunk.choices:
-                    continue
-                if chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-                    
-        except Exception as e:
-            logger.error(f"OpenAI streaming failed: {e}")
             raise
     
     async def embed(

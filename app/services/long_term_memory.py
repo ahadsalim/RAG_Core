@@ -103,7 +103,11 @@ class LongTermMemoryService:
                 Message(role="user", content=user_content)
             ]
             
-            response = await self.llm.generate(messages)
+            # استفاده از Responses API
+            response = await self.llm.generate_responses_api(
+                messages,
+                reasoning_effort="low"
+            )
             
             # Parse JSON response
             result = self._parse_json_response(response.content)
@@ -220,7 +224,11 @@ class LongTermMemoryService:
                 Message(role="user", content=user_content)
             ]
             
-            response = await self.llm.generate(messages)
+            # استفاده از Responses API
+            response = await self.llm.generate_responses_api(
+                messages,
+                reasoning_effort="low"
+            )
             result = self._parse_json_response(response.content)
             
             # Map index to actual memory ID
@@ -320,7 +328,11 @@ class LongTermMemoryService:
                 Message(role="user", content=f"حافظه‌های فعلی:\n{memories_text}")
             ]
             
-            response = await self.llm.generate(messages)
+            # استفاده از Responses API
+            response = await self.llm.generate_responses_api(
+                messages,
+                reasoning_effort="low"
+            )
             result = self._parse_json_response(response.content)
             
             return result.get("clean_memories", [])

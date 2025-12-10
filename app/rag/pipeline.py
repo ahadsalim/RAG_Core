@@ -252,10 +252,11 @@ class RAGPipeline:
             Message(role="user", content=query_text)
         ]
         
-        response = await self.llm.generate(
+        # استفاده از Responses API
+        response = await self.llm.generate_responses_api(
             messages=messages,
-            max_tokens=500,
-            temperature=0.7
+            reasoning_effort="low",
+            max_tokens=500
         )
         
         return response.content
@@ -306,10 +307,10 @@ class RAGPipeline:
                     Message(role="user", content=user_message)
                 ]
                 
-                # استفاده از LLM سبک‌تر برای enhancement
-                response = await self.llm.generate(
+                # استفاده از Responses API برای enhancement
+                response = await self.llm.generate_responses_api(
                     messages,
-                    temperature=0.1,  # کم برای consistency
+                    reasoning_effort="low",
                     max_tokens=200
                 )
                 
@@ -546,8 +547,11 @@ class RAGPipeline:
             # TODO: Load conversation history from database
             pass
         
-        # Generate response
-        response = await self.llm.generate(messages)
+        # Generate response با Responses API
+        response = await self.llm.generate_responses_api(
+            messages,
+            reasoning_effort="medium"
+        )
         
         return response.content, response.usage["total_tokens"]
     

@@ -60,6 +60,8 @@ class UserProfile(BaseModel):
     # Statistics
     last_active_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     total_tokens_used: Mapped[int] = mapped_column(Integer, default=0)
+    total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_feedback_given: Mapped[int] = mapped_column(Integer, default=0)
     
     # Relationships

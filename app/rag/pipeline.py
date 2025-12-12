@@ -58,6 +58,8 @@ class RAGResponse:
     processing_time_ms: int
     cached: bool = False
     model_used: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class RAGPipeline:
@@ -195,7 +197,7 @@ class RAGPipeline:
                 chunk_sources=[c.metadata.get('work_title', 'N/A')[:50] for c in chunks[:3]]
             )
             
-            answer, tokens_used = await self._generate_answer(
+            answer, tokens_used, input_tokens, output_tokens = await self._generate_answer(
                 query.text,
                 chunks,
                 query.language,
@@ -219,7 +221,9 @@ class RAGPipeline:
                 sources=sources,
                 total_tokens=tokens_used,
                 processing_time_ms=processing_time,
-                model_used=self.llm.config.model
+                model_used=self.llm.config.model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens
             )
             
             # Cache response if enabled
@@ -553,7 +557,12 @@ class RAGPipeline:
             reasoning_effort="medium"
         )
         
-        return response.content, response.usage["total_tokens"]
+        # برگرداندن توکن‌های ورودی و خروجی به صورت جداگانه
+        input_tokens = response.usage.get("prompt_tokens", 0)
+        output_tokens = response.usage.get("completion_tokens", 0)
+        total_tokens = response.usage.get("total_tokens", input_tokens + output_tokens)
+        
+        return response.content, total_tokens, input_tokens, output_tokens
     
     def _build_system_prompt(self, language: str, user_preferences: Optional[Dict[str, Any]] = None) -> str:
         """Build system prompt based on language and user preferences."""

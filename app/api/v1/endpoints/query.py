@@ -387,6 +387,15 @@ async def process_query_enhanced(
                 
                 conversation.message_count += 2
                 user.increment_query_count()
+                
+                # به‌روزرسانی توکن‌های کاربر
+                input_tokens = llm_response.usage.get("prompt_tokens", 0) if llm_response.usage else 0
+                output_tokens = llm_response.usage.get("completion_tokens", 0) if llm_response.usage else 0
+                total_tokens = llm_response.usage.get("total_tokens", 0) if llm_response.usage else 0
+                user.total_tokens_used += total_tokens
+                user.total_input_tokens += input_tokens
+                user.total_output_tokens += output_tokens
+                
                 await db.commit()
                 
                 processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
@@ -396,7 +405,7 @@ async def process_query_enhanced(
                     sources=[],
                     conversation_id=str(conversation.id),
                     message_id=str(assistant_msg.id),
-                    tokens_used=llm_response.usage.get("total_tokens", 0) if llm_response.usage else 0,
+                    tokens_used=total_tokens,
                     processing_time_ms=processing_time,
                     file_analysis=file_analysis,
                     context_used=False
@@ -497,6 +506,8 @@ async def process_query_enhanced(
         # به‌روزرسانی user
         user.increment_query_count()
         user.total_tokens_used += rag_response.total_tokens
+        user.total_input_tokens += rag_response.input_tokens
+        user.total_output_tokens += rag_response.output_tokens
         
         await db.commit()
         
@@ -528,8 +539,8 @@ async def process_query_enhanced(
             answer=rag_response.answer,
             category=classification.category,
             model=rag_response.model_used or settings.llm2_model,
-            input_tokens=rag_response.total_tokens,  # RAGResponse فقط total_tokens دارد
-            output_tokens=0,
+            input_tokens=rag_response.input_tokens,
+            output_tokens=rag_response.output_tokens,
             confidence=classification.confidence
         )
         

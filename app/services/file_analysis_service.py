@@ -279,8 +279,6 @@ class FileAnalysisService:
         user_query: str = ""
     ) -> Dict[str, Any]:
         """
-        تحلیل فایل از URL - دقیقاً مطابق فایل تست
-        
         اگر فایل تصویر باشد → مستقیم به مدل ارسال می‌شود (input_image)
         اگر فایل متنی باشد → ابتدا متن استخراج شده و سپس به مدل ارسال می‌شود
         
@@ -345,7 +343,7 @@ class FileAnalysisService:
                 
                 logger.info(f"Text extracted: {len(extracted_text)} characters")
                 
-                # ارسال متن به مدل (مانند فایل تست)
+                # ارسال متن به مدل
                 input_content = f"{ANALYSIS_PROMPT}\n\n---\n\n{ANALYSIS_USER_TEXT}\n\n**محتوای فایل:**\n{extracted_text}"
                 
                 response = await self.llm.generate_responses_api(

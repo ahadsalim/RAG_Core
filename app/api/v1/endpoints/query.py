@@ -35,6 +35,34 @@ from app.api.v1.endpoints.query_utils import (
 logger = structlog.get_logger()
 router = APIRouter()
 
+# ============================================================================
+# DEBUG MODE - اضافه کردن اطلاعات دیباگ به ابتدای پاسخ (موقت برای تست)
+# ============================================================================
+DEBUG_MODE = True  # برای غیرفعال کردن، False کنید
+
+def add_debug_info(
+    answer: str,
+    category: str,
+    model: str,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    confidence: float = 0.0
+) -> str:
+    """
+    اضافه کردن اطلاعات دیباگ به ابتدای پاسخ (موقت برای تست)
+    """
+    if not DEBUG_MODE:
+        return answer
+    
+    debug_header = f"""📊 **[DEBUG INFO]**
+🏷️ دسته: `{category}` | اطمینان: `{confidence:.0%}`
+🤖 مدل: `{model}`
+📥 توکن ورودی: `{input_tokens}` | 📤 توکن خروجی: `{output_tokens}`
+---
+
+"""
+    return debug_header + answer
+
 # Initialize memory services
 memory_service: ConversationMemory = get_conversation_memory()
 long_term_memory_service: LongTermMemoryService = get_long_term_memory_service()
@@ -170,6 +198,16 @@ async def process_query_enhanced(
                     
                     response_text = classification.direct_response or "متن شما قابل فهم نیست. لطفاً سوال خود را به صورت واضح و کامل بپرسید."
                     
+                    # اضافه کردن اطلاعات دیباگ
+                    response_text = add_debug_info(
+                        answer=response_text,
+                        category=classification.category,
+                        model="classifier (direct_response)",
+                        input_tokens=0,
+                        output_tokens=0,
+                        confidence=classification.confidence
+                    )
+                    
                     # ذخیره در دیتابیس
                     user_msg = DBMessage(
                         id=uuid.uuid4(),
@@ -216,6 +254,16 @@ async def process_query_enhanced(
                 # اگر فایل معنادار است، سوال هوشمندانه بپرس
                 # اگر فایل بی‌معنی است، درخواست توضیح کن
                 response_text = classification.direct_response or "لطفاً سوال خود را واضح‌تر بیان کنید."
+                
+                # اضافه کردن اطلاعات دیباگ
+                response_text = add_debug_info(
+                    answer=response_text,
+                    category=classification.category,
+                    model="classifier (direct_response)",
+                    input_tokens=0,
+                    output_tokens=0,
+                    confidence=classification.confidence
+                )
                 
                 # ذخیره در دیتابیس
                 user_msg = DBMessage(
@@ -307,6 +355,16 @@ async def process_query_enhanced(
                     reasoning_effort="low"
                 )
                 response_text = llm_response.content
+                
+                # اضافه کردن اطلاعات دیباگ
+                response_text = add_debug_info(
+                    answer=response_text,
+                    category=classification.category,
+                    model=settings.llm1_model,
+                    input_tokens=llm_response.usage.get("prompt_tokens", 0) if llm_response.usage else 0,
+                    output_tokens=llm_response.usage.get("completion_tokens", 0) if llm_response.usage else 0,
+                    confidence=classification.confidence
+                )
                 
                 # ذخیره در دیتابیس
                 user_msg = DBMessage(
@@ -465,8 +523,18 @@ async def process_query_enhanced(
         # ========== مرحله 10: برگرداندن پاسخ ==========
         processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
         
-        return QueryResponse(
+        # اضافه کردن اطلاعات دیباگ به پاسخ RAG
+        final_answer = add_debug_info(
             answer=rag_response.answer,
+            category=classification.category,
+            model=rag_response.model_used or settings.llm2_model,
+            input_tokens=rag_response.total_tokens,  # RAGResponse فقط total_tokens دارد
+            output_tokens=0,
+            confidence=classification.confidence
+        )
+        
+        return QueryResponse(
+            answer=final_answer,
             sources=rag_response.sources,
             conversation_id=str(conversation.id),
             message_id=str(assistant_message.id),

@@ -185,64 +185,117 @@ async def process_query_enhanced(
                 needs_clarification=classification.needs_clarification
             )
             
+            # ========== هندل اطمینان پایین ==========
+            # اگر اطمینان زیر 50% است، درخواست توضیح کن
+            # توجه: needs_clarification برای invalid ها طبیعی است و جداگانه هندل می‌شود
+            if classification.confidence < 0.5 and classification.category not in ["invalid_no_file", "invalid_with_file"]:
+                logger.info(
+                    "Low confidence or needs clarification",
+                    confidence=classification.confidence,
+                    needs_clarification=classification.needs_clarification,
+                    original_category=classification.category
+                )
+                
+                # پاسخ درخواست توضیح
+                clarification_response = classification.direct_response or "متوجه منظور شما نشدم. لطفاً سوال یا درخواست خود را واضح‌تر بیان کنید."
+                
+                # اضافه کردن اطلاعات دیباگ
+                clarification_response = add_debug_info(
+                    answer=clarification_response,
+                    category=f"{classification.category} (low_confidence)",
+                    model="classifier",
+                    input_tokens=0,
+                    output_tokens=0,
+                    confidence=classification.confidence
+                )
+                
+                # ذخیره در دیتابیس
+                user_msg = DBMessage(
+                    id=uuid.uuid4(),
+                    conversation_id=conversation.id,
+                    role=MessageRole.USER,
+                    content=request.query,
+                    created_at=datetime.utcnow()
+                )
+                db.add(user_msg)
+                
+                assistant_msg = DBMessage(
+                    id=uuid.uuid4(),
+                    conversation_id=conversation.id,
+                    role=MessageRole.ASSISTANT,
+                    content=clarification_response,
+                    created_at=datetime.utcnow()
+                )
+                db.add(assistant_msg)
+                
+                conversation.message_count += 2
+                user.increment_query_count()
+                await db.commit()
+                
+                processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                
+                return QueryResponse(
+                    answer=clarification_response,
+                    sources=[],
+                    conversation_id=str(conversation.id),
+                    message_id=str(assistant_msg.id),
+                    tokens_used=0,
+                    processing_time_ms=processing_time,
+                    file_analysis=file_analysis,
+                    context_used=bool(short_term_memory or long_term_memory)
+                )
+            
             # ========== مسیر 1: invalid_no_file - متن نامعتبر بدون فایل ==========
-            # اما اگر context دارد، ممکن است follow-up باشد، پس به general می‌فرستیم
             if classification.category == "invalid_no_file":
-                # اگر memory داریم، احتمالاً follow-up است
-                if short_term_memory or long_term_memory:
-                    logger.info("invalid_no_file but has memory context - treating as general")
-                    # به جای invalid، به عنوان general handle می‌کنیم
-                    classification.category = "general"
-                else:
-                    logger.info("Handling invalid_no_file: asking for clarification")
-                    
-                    response_text = classification.direct_response or "متن شما قابل فهم نیست. لطفاً سوال خود را به صورت واضح و کامل بپرسید."
-                    
-                    # اضافه کردن اطلاعات دیباگ
-                    response_text = add_debug_info(
-                        answer=response_text,
-                        category=classification.category,
-                        model="classifier (direct_response)",
-                        input_tokens=0,
-                        output_tokens=0,
-                        confidence=classification.confidence
-                    )
-                    
-                    # ذخیره در دیتابیس
-                    user_msg = DBMessage(
-                        id=uuid.uuid4(),
-                        conversation_id=conversation.id,
-                        role=MessageRole.USER,
-                        content=request.query,
-                        created_at=datetime.utcnow()
-                    )
-                    db.add(user_msg)
-                    
-                    assistant_msg = DBMessage(
-                        id=uuid.uuid4(),
-                        conversation_id=conversation.id,
-                        role=MessageRole.ASSISTANT,
-                        content=response_text,
-                        created_at=datetime.utcnow()
-                    )
-                    db.add(assistant_msg)
-                    
-                    conversation.message_count += 2
-                    user.increment_query_count()
-                    await db.commit()
-                    
-                    processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-                    
-                    return QueryResponse(
-                        answer=response_text,
-                        sources=[],
-                        conversation_id=str(conversation.id),
-                        message_id=str(assistant_msg.id),
-                        tokens_used=0,
-                        processing_time_ms=processing_time,
-                        file_analysis=None,
-                        context_used=False
-                    )
+                logger.info("Handling invalid_no_file: asking for clarification")
+                
+                response_text = classification.direct_response or "متن شما قابل فهم نیست. لطفاً سوال خود را به صورت واضح و کامل بپرسید."
+                
+                # اضافه کردن اطلاعات دیباگ
+                response_text = add_debug_info(
+                    answer=response_text,
+                    category=classification.category,
+                    model="classifier",
+                    input_tokens=0,
+                    output_tokens=0,
+                    confidence=classification.confidence
+                )
+                
+                # ذخیره در دیتابیس
+                user_msg = DBMessage(
+                    id=uuid.uuid4(),
+                    conversation_id=conversation.id,
+                    role=MessageRole.USER,
+                    content=request.query,
+                    created_at=datetime.utcnow()
+                )
+                db.add(user_msg)
+                
+                assistant_msg = DBMessage(
+                    id=uuid.uuid4(),
+                    conversation_id=conversation.id,
+                    role=MessageRole.ASSISTANT,
+                    content=response_text,
+                    created_at=datetime.utcnow()
+                )
+                db.add(assistant_msg)
+                
+                conversation.message_count += 2
+                user.increment_query_count()
+                await db.commit()
+                
+                processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                
+                return QueryResponse(
+                    answer=response_text,
+                    sources=[],
+                    conversation_id=str(conversation.id),
+                    message_id=str(assistant_msg.id),
+                    tokens_used=0,
+                    processing_time_ms=processing_time,
+                    file_analysis=None,
+                    context_used=False
+                )
             
             # ========== مسیر 2: invalid_with_file - متن مبهم با فایل ==========
             elif classification.category == "invalid_with_file":
@@ -259,7 +312,7 @@ async def process_query_enhanced(
                 response_text = add_debug_info(
                     answer=response_text,
                     category=classification.category,
-                    model="classifier (direct_response)",
+                    model="classifier",
                     input_tokens=0,
                     output_tokens=0,
                     confidence=classification.confidence
@@ -454,7 +507,8 @@ async def process_query_enhanced(
         pipeline = RAGPipeline()
         rag_response = await pipeline.process(
             rag_query,
-            additional_context=llm_context  # Context کامل برای LLM
+            additional_context=llm_context,  # Context کامل برای LLM
+            skip_classification=True  # Classification قبلاً انجام شده
         )
         
         # ========== مرحله 8: ذخیره پیام‌ها ==========

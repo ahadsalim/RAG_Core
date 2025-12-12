@@ -76,13 +76,14 @@ class RAGPipeline:
         self.reranker = None  # Will be initialized if needed
         logger.info("RAG Pipeline initialized with LLM2 (Pro)")
         
-    async def process(self, query: RAGQuery, additional_context: str = None) -> RAGResponse:
+    async def process(self, query: RAGQuery, additional_context: str = None, skip_classification: bool = False) -> RAGResponse:
         """
         Process a query through the RAG pipeline.
         
         Args:
             query: RAG query request
             additional_context: Additional context for LLM (memory, file analysis, etc.)
+            skip_classification: Skip classification if already done in query endpoint
             
         Returns:
             RAG response with answer and sources
@@ -90,9 +91,10 @@ class RAGPipeline:
         start_time = datetime.utcnow()
         
         try:
-            # Step 0: Classify query using LLM (if enabled)
+            # Step 0: Classify query using LLM (if enabled and not skipped)
+            # توجه: اگر از query.py آمده، classification قبلاً انجام شده و skip می‌شود
             classification = None
-            if settings.enable_query_classification:
+            if settings.enable_query_classification and not skip_classification:
                 classification = await self.classifier.classify(query.text, query.language)
                 
                 logger.info(

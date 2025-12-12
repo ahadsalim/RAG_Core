@@ -242,15 +242,30 @@ class OpenAIProvider(BaseLLM):
             
             # Run sync client in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.sync_client.responses.create(
-                    model=self.config.model,
-                    input=input_content,
-                    reasoning={"effort": reasoning_effort},
-                    max_output_tokens=max_tokens_value,
+            
+            # فقط مدل‌های gpt-5 از reasoning پشتیبانی می‌کنند
+            model_supports_reasoning = "gpt-5" in self.config.model.lower() or "o1" in self.config.model.lower()
+            
+            if model_supports_reasoning:
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: self.sync_client.responses.create(
+                        model=self.config.model,
+                        input=input_content,
+                        reasoning={"effort": reasoning_effort},
+                        max_output_tokens=max_tokens_value,
+                    )
                 )
-            )
+            else:
+                # برای مدل‌های قدیمی‌تر مثل gpt-4o-mini، بدون reasoning
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: self.sync_client.responses.create(
+                        model=self.config.model,
+                        input=input_content,
+                        max_output_tokens=max_tokens_value,
+                    )
+                )
             
             # Extract response text
             content = extract_responses_api_text(response)

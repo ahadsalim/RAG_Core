@@ -143,6 +143,78 @@ class LLMWithFallback:
             logger.error(f"Fallback LLM failed: {e}")
             raise Exception(f"Fallback LLM failed: {e}")
     
+    async def generate_responses_api(
+        self, 
+        messages: List[Message], 
+        reasoning_effort: str = "medium",
+        **kwargs
+    ) -> LLMResponse:
+        """
+        Generate response using Responses API with automatic fallback
+        
+        Args:
+            messages: لیست پیام‌ها
+            reasoning_effort: سطح استدلال (low, medium, high)
+            **kwargs: پارامترهای اضافی
+            
+        Returns:
+            LLMResponse از primary یا fallback
+        """
+        timeout = settings.llm_primary_timeout
+        
+        # اگر primary قبلاً down شده، مستقیم به fallback برو
+        if is_primary_llm_down():
+            logger.info("Primary LLM is marked as DOWN, using fallback directly")
+            if self.fallback_llm:
+                return await self._call_fallback_responses_api(messages, reasoning_effort, timeout, **kwargs)
+            else:
+                raise Exception("Primary LLM is down and no fallback configured")
+        
+        # تلاش با Primary
+        try:
+            logger.debug(f"Trying primary LLM (Responses API): {self.primary_config.model}")
+            response = await asyncio.wait_for(
+                self.primary_llm.generate_responses_api(messages, reasoning_effort=reasoning_effort, **kwargs),
+                timeout=timeout
+            )
+            logger.info("Primary LLM (Responses API) responded successfully")
+            return response
+        except asyncio.TimeoutError:
+            logger.warning(f"Primary LLM timeout ({timeout}s)")
+            set_primary_llm_down(True)
+        except Exception as e:
+            logger.warning(f"Primary LLM failed: {e}")
+            set_primary_llm_down(True)
+        
+        # تلاش با Fallback
+        if self.fallback_llm:
+            return await self._call_fallback_responses_api(messages, reasoning_effort, timeout, **kwargs)
+        else:
+            raise Exception("Primary LLM failed and no fallback configured")
+    
+    async def _call_fallback_responses_api(
+        self, 
+        messages: List[Message], 
+        reasoning_effort: str,
+        timeout: float,
+        **kwargs
+    ) -> LLMResponse:
+        """فراخوانی Fallback LLM با Responses API"""
+        try:
+            logger.info(f"Trying fallback LLM (Responses API): {self.fallback_config.model}")
+            response = await asyncio.wait_for(
+                self.fallback_llm.generate_responses_api(messages, reasoning_effort=reasoning_effort, **kwargs),
+                timeout=timeout
+            )
+            logger.info("Fallback LLM (Responses API) responded successfully")
+            return response
+        except asyncio.TimeoutError:
+            logger.error(f"Fallback LLM timeout ({timeout}s)")
+            raise Exception("Fallback LLM timed out")
+        except Exception as e:
+            logger.error(f"Fallback LLM failed: {e}")
+            raise Exception(f"Fallback LLM failed: {e}")
+    
 def create_llm1_light() -> LLMWithFallback:
     """
     ایجاد LLM1 (Light) برای سوالات ساده

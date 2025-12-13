@@ -515,9 +515,15 @@ async def process_query_enhanced(
         classifier_wants_web_search = classification.needs_web_search
         
         # تصمیم نهایی: classifier باید بگوید نیاز است AND کاربر نباید صریحاً غیرفعال کرده باشد
+        # همچنین بررسی می‌کنیم که آیا کاربر جستجوی وب را غیرفعال کرده در حالی که نیاز بود
+        web_search_blocked_by_user = False
+        
         if request.enable_web_search is False:
             # کاربر صریحاً غیرفعال کرده
             web_search_enabled = False
+            if classifier_wants_web_search:
+                # classifier می‌گوید نیاز است ولی کاربر غیرفعال کرده
+                web_search_blocked_by_user = True
         else:
             # classifier تصمیم می‌گیرد
             web_search_enabled = classifier_wants_web_search
@@ -631,8 +637,14 @@ async def process_query_enhanced(
         if web_search_enabled:
             model_display = f"{model_display} (web_search)"
         
+        # اضافه کردن پیام هشدار اگر کاربر جستجوی وب را غیرفعال کرده در حالی که نیاز بود
+        answer_with_warning = rag_response.answer
+        if web_search_blocked_by_user:
+            web_search_warning = "\n\n---\n⚠️ **توجه:** برای پاسخ دقیق‌تر به این سوال، نیاز به جستجوی اینترنت بود که در تنظیمات شما غیرفعال است. برای دریافت اطلاعات به‌روزتر، لطفاً جستجوی وب را در تنظیمات فعال کنید."
+            answer_with_warning = rag_response.answer + web_search_warning
+        
         final_answer = add_debug_info(
-            answer=rag_response.answer,
+            answer=answer_with_warning,
             category=classification.category,
             model=model_display,
             input_tokens=rag_response.input_tokens,

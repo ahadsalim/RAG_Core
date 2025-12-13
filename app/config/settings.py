@@ -134,6 +134,7 @@ class Settings(BaseSettings):
     # --- LLM Timeout Settings ---
     # فقط یک تایم‌اوت: اگر primary در این زمان جواب نداد، به fallback می‌رود
     llm_primary_timeout: int = Field(default=15, ge=1, description="Timeout for primary LLM (seconds) - fallback uses same timeout")
+    llm_web_search_timeout: int = Field(default=60, ge=1, description="Timeout for web search requests (seconds) - longer due to external API calls")
     
     # --- Backward Compatibility (use LLM1 as default) ---
     @property

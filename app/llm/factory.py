@@ -229,7 +229,8 @@ class LLMWithFallback:
         Returns:
             LLMResponse از primary یا fallback
         """
-        timeout = settings.llm_primary_timeout
+        # استفاده از timeout بیشتر برای web search (به دلیل فراخوانی API خارجی)
+        timeout = settings.llm_web_search_timeout
         
         # اگر primary قبلاً down شده، مستقیم به fallback برو
         if is_primary_llm_down():

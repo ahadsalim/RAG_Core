@@ -214,8 +214,16 @@ class RAGPipeline:
                 enable_web_search=query.enable_web_search
             )
             
-            # Step 6: Extract sources
-            sources = self._extract_sources(chunks)
+            # Step 6: Extract sources (unless LLM indicated no sources should be shown)
+            # اگر LLM تشخیص داد که قانون/ماده وجود ندارد، منابع نمایش داده نشوند
+            if answer.startswith("[NO_SOURCES]"):
+                # حذف تگ از پاسخ و خالی کردن منابع
+                answer = answer.replace("[NO_SOURCES]", "").strip()
+                sources = []
+                chunks = []
+                logger.info("LLM indicated no sources should be shown (non-existent law/article)")
+            else:
+                sources = self._extract_sources(chunks)
             
             # Calculate processing time
             processing_time = int(
@@ -452,8 +460,8 @@ class RAGPipeline:
         if not chunks:
             return []
         
-        # If we have Cohere reranker configured
-        if settings.cohere_api_key and self.reranker:
+        # If we have reranker configured (local Docker service or Cohere API)
+        if self.reranker:
             try:
                 reranked = await self.reranker.rerank(
                     query=query,
@@ -467,6 +475,13 @@ class RAGPipeline:
                     chunk = chunks[idx]
                     chunk.score = score  # Update score with rerank score
                     reranked_chunks.append(chunk)
+                
+                logger.info(
+                    "Reranking completed",
+                    original_count=len(chunks),
+                    reranked_count=len(reranked_chunks),
+                    top_scores=[c.score for c in reranked_chunks[:3]]
+                )
                 
                 return reranked_chunks
                 
@@ -829,7 +844,9 @@ class RAGPipeline:
                     total_tokens=data["total_tokens"],
                     processing_time_ms=data["processing_time_ms"],
                     cached=True,
-                    model_used=data.get("model_used", "")
+                    model_used=data.get("model_used", ""),
+                    input_tokens=data.get("input_tokens", 0),
+                    output_tokens=data.get("output_tokens", 0)
                 )
             
         except Exception as e:
@@ -872,7 +889,9 @@ class RAGPipeline:
                 "sources": response.sources,
                 "total_tokens": response.total_tokens,
                 "processing_time_ms": response.processing_time_ms,
-                "model_used": response.model_used
+                "model_used": response.model_used,
+                "input_tokens": response.input_tokens,
+                "output_tokens": response.output_tokens
             }
             
             # Cache in Redis with TTL

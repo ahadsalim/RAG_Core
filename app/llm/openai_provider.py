@@ -289,6 +289,77 @@ class OpenAIProvider(BaseLLM):
         except Exception as e:
             logger.error(f"OpenAI Responses API failed: {e}")
             raise
+    
+    async def generate_with_web_search(
+        self,
+        messages: List[Message],
+        **kwargs
+    ) -> LLMResponse:
+        """
+        Generate a response using OpenAI Responses API with web search enabled.
+        
+        Args:
+            messages: List of messages
+            **kwargs: Additional parameters
+        
+        Returns:
+            LLMResponse with content, usage info, and web search results
+        """
+        try:
+            max_tokens_value = kwargs.get("max_tokens", self.config.max_tokens)
+            
+            # Convert messages to input format
+            formatted_messages = self.prepare_messages(messages)
+            
+            # Build input content
+            input_parts = []
+            for msg in formatted_messages:
+                role = msg["role"]
+                content = msg["content"]
+                if role == "system":
+                    input_parts.append(content)
+                elif role == "user":
+                    input_parts.append(f"\n---\n\n{content}")
+                elif role == "assistant":
+                    input_parts.append(f"\n[Assistant]: {content}")
+            
+            input_content = "\n".join(input_parts)
+            
+            # Run sync client in thread pool
+            loop = asyncio.get_event_loop()
+            
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.sync_client.responses.create(
+                    model=self.config.model,
+                    input=input_content,
+                    tools=[{"type": "web_search_preview"}],
+                    max_output_tokens=max_tokens_value,
+                )
+            )
+            
+            # Extract response text
+            content = extract_responses_api_text(response)
+            input_tokens, output_tokens = extract_responses_api_tokens(response)
+            
+            return LLMResponse(
+                content=content,
+                model=self.config.model,
+                usage={
+                    "prompt_tokens": input_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                },
+                finish_reason="stop",
+                metadata={
+                    "api_type": "responses",
+                    "web_search_enabled": True,
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"OpenAI Responses API with web search failed: {e}")
+            raise
 
 
 # NOTE: OpenAIEmbedding class has been removed.

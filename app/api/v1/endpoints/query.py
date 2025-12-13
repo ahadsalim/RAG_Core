@@ -356,7 +356,10 @@ async def process_query_enhanced(
             
             # ========== مسیر 3: general - سوال عمومی غیر کسب‌وکار ==========
             elif classification.category == "general":
-                logger.info("Handling general: using LLM1 (Light) without RAG")
+                logger.info(
+                    "Handling general: using LLM1 (Light) without RAG",
+                    needs_web_search=classification.needs_web_search
+                )
                 
                 # استفاده از LLM1 (Light) برای سوالات ساده
                 from app.llm.factory import get_llm_for_category
@@ -402,18 +405,24 @@ async def process_query_enhanced(
                     Message(role="user", content=user_message)
                 ]
                 
-                # استفاده از Responses API
-                llm_response = await llm.generate_responses_api(
-                    messages,
-                    reasoning_effort="low"
-                )
+                # انتخاب روش پاسخ‌دهی بر اساس نیاز به web search
+                if classification.needs_web_search:
+                    logger.info("Using web search for general query")
+                    llm_response = await llm.generate_with_web_search(messages)
+                    model_used = f"{settings.llm1_model} (web_search)"
+                else:
+                    llm_response = await llm.generate_responses_api(
+                        messages,
+                        reasoning_effort="low"
+                    )
+                    model_used = settings.llm1_model
                 response_text = llm_response.content
                 
                 # اضافه کردن اطلاعات دیباگ
                 response_text = add_debug_info(
                     answer=response_text,
                     category=classification.category,
-                    model=settings.llm1_model,
+                    model=model_used,
                     input_tokens=llm_response.usage.get("prompt_tokens", 0) if llm_response.usage else 0,
                     output_tokens=llm_response.usage.get("completion_tokens", 0) if llm_response.usage else 0,
                     confidence=classification.confidence

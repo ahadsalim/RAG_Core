@@ -27,6 +27,7 @@ class QueryCategory(BaseModel):
     direct_response: Optional[str] = None  # پاسخ مستقیم برای موارد غیر سوالی
     has_meaningful_files: Optional[bool] = None  # آیا فایل‌ها معنادار هستند؟
     needs_clarification: bool = False  # آیا نیاز به توضیح بیشتر دارد؟
+    needs_web_search: bool = False  # آیا نیاز به جستجوی وب دارد؟
 
 
 class QueryClassifier:
@@ -217,7 +218,8 @@ class QueryClassifier:
                 confidence=float(data.get("confidence", 0.5)),
                 direct_response=data.get("direct_response"),
                 has_meaningful_files=data.get("has_meaningful_files"),
-                needs_clarification=data.get("needs_clarification", False)
+                needs_clarification=data.get("needs_clarification", False),
+                needs_web_search=data.get("needs_web_search", False)
             )
             
         except json.JSONDecodeError as e:

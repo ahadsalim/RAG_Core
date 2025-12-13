@@ -331,12 +331,18 @@ class ClassificationPrompts:
   "confidence": 0.0-1.0,
   "direct_response": "متن پاسخ یا null",
   "has_meaningful_files": true/false/null,
-  "needs_clarification": true/false
+  "needs_clarification": true/false,
+  "needs_web_search": true/false
 }
 
 **قوانین مهم direct_response:**
 - برای `invalid_no_file` و `invalid_with_file` فیلد direct_response **حتماً** باید مقدار داشته باشد (نباید null باشد)
 - برای `general`، `business_no_file` و `business_with_file` فیلد direct_response باید null باشد
+
+**قوانین needs_web_search:**
+- اگر سوال نیاز به اطلاعات به‌روز دارد (مثل قیمت، آب‌وهوا، اخبار، رویدادهای جاری) → true
+- اگر سوال درباره اطلاعات ثابت یا عمومی است → false
+- فقط برای دسته `general` این فیلد معنادار است
 
 **فقط JSON خالص برگردان.**"""
 

@@ -215,6 +215,74 @@ class LLMWithFallback:
             logger.error(f"Fallback LLM failed: {e}")
             raise Exception(f"Fallback LLM failed: {e}")
     
+    async def generate_with_web_search(
+        self,
+        messages: List[Message],
+        **kwargs
+    ) -> LLMResponse:
+        """
+        Generate response with web search enabled using Responses API with fallback
+        
+        Args:
+            messages: لیست پیام‌ها
+            
+        Returns:
+            LLMResponse از primary یا fallback
+        """
+        timeout = settings.llm_primary_timeout
+        
+        # اگر primary قبلاً down شده، مستقیم به fallback برو
+        if is_primary_llm_down():
+            logger.info("Primary LLM is marked as DOWN, using fallback directly for web search")
+            if self.fallback_llm:
+                return await self._call_fallback_web_search(messages, timeout, **kwargs)
+            else:
+                raise Exception("Primary LLM is down and no fallback configured")
+        
+        # تلاش با Primary
+        try:
+            logger.debug(f"Trying primary LLM (Web Search): {self.primary_config.model}")
+            response = await asyncio.wait_for(
+                self.primary_llm.generate_with_web_search(messages, **kwargs),
+                timeout=timeout
+            )
+            logger.info("Primary LLM (Web Search) responded successfully")
+            return response
+        except asyncio.TimeoutError:
+            logger.warning(f"Primary LLM web search timeout ({timeout}s)")
+            set_primary_llm_down(True)
+        except Exception as e:
+            logger.warning(f"Primary LLM web search failed: {e}")
+            set_primary_llm_down(True)
+        
+        # تلاش با Fallback
+        if self.fallback_llm:
+            return await self._call_fallback_web_search(messages, timeout, **kwargs)
+        else:
+            raise Exception("Primary LLM failed and no fallback configured")
+    
+    async def _call_fallback_web_search(
+        self, 
+        messages: List[Message], 
+        timeout: float,
+        **kwargs
+    ) -> LLMResponse:
+        """فراخوانی Fallback LLM با Web Search"""
+        try:
+            logger.info(f"Trying fallback LLM (Web Search): {self.fallback_config.model}")
+            response = await asyncio.wait_for(
+                self.fallback_llm.generate_with_web_search(messages, **kwargs),
+                timeout=timeout
+            )
+            logger.info("Fallback LLM (Web Search) responded successfully")
+            return response
+        except asyncio.TimeoutError:
+            logger.error(f"Fallback LLM web search timeout ({timeout}s)")
+            raise Exception("Fallback LLM web search timed out")
+        except Exception as e:
+            logger.error(f"Fallback LLM web search failed: {e}")
+            raise Exception(f"Fallback LLM web search failed: {e}")
+    
 def create_llm1_light() -> LLMWithFallback:
     """
     ایجاد LLM1 (Light) برای سوالات ساده

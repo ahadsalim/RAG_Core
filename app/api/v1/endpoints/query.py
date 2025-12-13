@@ -88,6 +88,10 @@ class QueryRequest(BaseModel):
     use_reranking: bool = True
     user_preferences: Optional[Dict[str, Any]] = None
     file_attachments: Optional[List[FileAttachment]] = Field(None, max_items=5)
+    enable_web_search: Optional[bool] = Field(
+        default=None, 
+        description="Enable web search for RAG responses. If None, uses server default (ENABLE_RAG_WEB_SEARCH). Set to True/False to override."
+    )
 
 
 class QueryResponse(BaseModel):
@@ -501,6 +505,9 @@ async def process_query_enhanced(
         )
         
         # ========== مرحله 7: پردازش با RAG Pipeline ==========
+        # تعیین وضعیت web search: اگر کاربر مشخص کرده از آن استفاده کن، وگرنه از تنظیمات سرور
+        web_search_enabled = request.enable_web_search if request.enable_web_search is not None else settings.enable_rag_web_search
+        
         rag_query = RAGQuery(
             text=search_query,  # فقط سوال اصلی برای embedding
             user_id=str(user.id),
@@ -511,7 +518,7 @@ async def process_query_enhanced(
             use_cache=request.use_cache,
             use_reranking=request.use_reranking,
             user_preferences=request.user_preferences,
-            enable_web_search=settings.enable_rag_web_search  # Web search برای تکمیل RAG
+            enable_web_search=web_search_enabled  # Web search بر اساس تنظیم کاربر یا سرور
         )
         
         pipeline = RAGPipeline()
@@ -600,7 +607,7 @@ async def process_query_enhanced(
         
         # اضافه کردن اطلاعات دیباگ به پاسخ RAG
         model_display = rag_response.model_used or settings.llm2_model
-        if settings.enable_rag_web_search:
+        if web_search_enabled:
             model_display = f"{model_display} (web_search)"
         
         final_answer = add_debug_info(

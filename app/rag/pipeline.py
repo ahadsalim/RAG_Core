@@ -62,6 +62,7 @@ class RAGResponse:
     model_used: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    reranker_details: Optional[List[Dict[str, Any]]] = None  # اطلاعات کامل reranker
 
 
 class RAGPipeline:
@@ -179,8 +180,9 @@ class RAGPipeline:
             )
             
             # Step 4: Rerank if enabled
+            reranker_details = []
             if query.use_reranking and len(chunks) > query.max_chunks:
-                chunks = await self._rerank_chunks(
+                chunks, reranker_details = await self._rerank_chunks(
                     enhanced_query,
                     chunks,
                     top_k=query.max_chunks
@@ -266,7 +268,8 @@ class RAGPipeline:
                 processing_time_ms=processing_time,
                 model_used=self.llm.config.model,
                 input_tokens=input_tokens,
-                output_tokens=output_tokens
+                output_tokens=output_tokens,
+                reranker_details=reranker_details
             )
             
             # Cache response if enabled
@@ -472,7 +475,7 @@ class RAGPipeline:
         query: str,
         chunks: List[RAGChunk],
         top_k: int
-    ) -> List[RAGChunk]:
+    ) -> Tuple[List[RAGChunk], List[Dict[str, Any]]]:
         """
         Rerank chunks for better relevance.
         
@@ -482,23 +485,38 @@ class RAGPipeline:
             top_k: Number of top chunks to return
             
         Returns:
-            Reranked chunks
+            Tuple of (reranked_chunks, reranker_details)
+            reranker_details contains full info about all chunks before filtering
         """
+        reranker_details = []
+        
         if not chunks:
-            return []
+            return [], []
         
         # If we have reranker configured (local Docker service or Cohere API)
         if self.reranker:
             try:
+                # درخواست همه نتایج برای دیدن امتیازات کامل
                 reranked = await self.reranker.rerank(
                     query=query,
                     documents=[c.text for c in chunks],
-                    top_k=top_k
+                    top_k=len(chunks)  # همه را بگیر
                 )
                 
-                # Reorder chunks based on reranking
-                reranked_chunks = []
+                # ذخیره اطلاعات کامل همه chunks
                 for idx, score in reranked:
+                    chunk = chunks[idx]
+                    reranker_details.append({
+                        "original_index": idx,
+                        "score": round(score, 4),
+                        "source": chunk.metadata.get("work_title", "")[:50],
+                        "unit": chunk.metadata.get("unit_number", ""),
+                        "text_preview": chunk.text[:100] + "..." if len(chunk.text) > 100 else chunk.text
+                    })
+                
+                # Reorder chunks based on reranking - فقط top_k
+                reranked_chunks = []
+                for idx, score in reranked[:top_k]:
                     chunk = chunks[idx]
                     chunk.score = score  # Update score with rerank score
                     reranked_chunks.append(chunk)
@@ -507,17 +525,18 @@ class RAGPipeline:
                     "Reranking completed",
                     original_count=len(chunks),
                     reranked_count=len(reranked_chunks),
+                    all_scores=[d["score"] for d in reranker_details],
                     top_scores=[c.score for c in reranked_chunks[:3]]
                 )
                 
-                return reranked_chunks
+                return reranked_chunks, reranker_details
                 
             except Exception as e:
                 logger.warning(f"Reranking failed, using original order: {e}")
         
         # Fallback: Simple score-based reranking
-        # Combine original score with text similarity
-        return sorted(chunks, key=lambda x: x.score, reverse=True)[:top_k]
+        sorted_chunks = sorted(chunks, key=lambda x: x.score, reverse=True)[:top_k]
+        return sorted_chunks, []
     
     async def _generate_answer(
         self,

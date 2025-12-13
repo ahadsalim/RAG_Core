@@ -48,7 +48,7 @@ def add_debug_info(
     output_tokens: int = 0,
     confidence: float = 0.0,
     cached: bool = False,
-    reranker_scores: list = None
+    reranker_details: list = None
 ) -> str:
     """
     اضافه کردن اطلاعات دیباگ به ابتدای پاسخ (موقت برای تست)
@@ -62,11 +62,18 @@ def add_debug_info(
     else:
         token_info = f"📥 توکن ورودی: `{input_tokens}` | 📤 توکن خروجی: `{output_tokens}`"
     
-    # اطلاعات reranker
+    # اطلاعات کامل reranker
     reranker_info = ""
-    if reranker_scores:
-        scores_str = ", ".join([f"{s:.3f}" for s in reranker_scores[:5]])
-        reranker_info = f"\n🔄 Reranker scores: [{scores_str}]"
+    if reranker_details:
+        reranker_lines = ["\n🔄 **Reranker Results (همه chunks):**"]
+        for i, detail in enumerate(reranker_details):
+            score = detail.get("score", 0)
+            source = detail.get("source", "?")[:40]
+            unit = detail.get("unit", "")
+            # نشانه‌گذاری top 5 که به LLM داده شدند
+            marker = "✅" if i < 5 else "❌"
+            reranker_lines.append(f"  {marker} #{i+1}: `{score:.4f}` | {source} | ماده {unit}")
+        reranker_info = "\n".join(reranker_lines)
     
     debug_header = f"""📊 **[DEBUG INFO]**
 🏷️ دسته: `{category}` | اطمینان: `{confidence:.0%}`
@@ -657,9 +664,6 @@ async def process_query_enhanced(
             web_search_warning = "\n\n---\n⚠️ **توجه:** برای پاسخ دقیق‌تر به این سوال، نیاز به جستجوی اینترنت بود که در تنظیمات شما غیرفعال است. برای دریافت اطلاعات به‌روزتر، لطفاً جستجوی وب را در تنظیمات فعال کنید."
             answer_with_warning = rag_response.answer + web_search_warning
         
-        # استخراج امتیازات reranker از chunks
-        reranker_scores = [chunk.score for chunk in rag_response.chunks] if rag_response.chunks else []
-        
         final_answer = add_debug_info(
             answer=answer_with_warning,
             category=classification.category,
@@ -668,7 +672,7 @@ async def process_query_enhanced(
             output_tokens=rag_response.output_tokens,
             confidence=classification.confidence,
             cached=rag_response.cached,
-            reranker_scores=reranker_scores
+            reranker_details=rag_response.reranker_details
         )
         
         return QueryResponse(

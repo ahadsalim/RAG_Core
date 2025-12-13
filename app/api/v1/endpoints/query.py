@@ -46,7 +46,9 @@ def add_debug_info(
     model: str,
     input_tokens: int = 0,
     output_tokens: int = 0,
-    confidence: float = 0.0
+    confidence: float = 0.0,
+    cached: bool = False,
+    reranker_scores: list = None
 ) -> str:
     """
     اضافه کردن اطلاعات دیباگ به ابتدای پاسخ (موقت برای تست)
@@ -54,10 +56,22 @@ def add_debug_info(
     if not DEBUG_MODE:
         return answer
     
+    # اگر از cache آمده، توکن‌ها صفر هستند (هزینه‌ای نداریم)
+    if cached:
+        token_info = "💾 از کش (بدون هزینه توکن)"
+    else:
+        token_info = f"📥 توکن ورودی: `{input_tokens}` | 📤 توکن خروجی: `{output_tokens}`"
+    
+    # اطلاعات reranker
+    reranker_info = ""
+    if reranker_scores:
+        scores_str = ", ".join([f"{s:.3f}" for s in reranker_scores[:5]])
+        reranker_info = f"\n🔄 Reranker scores: [{scores_str}]"
+    
     debug_header = f"""📊 **[DEBUG INFO]**
 🏷️ دسته: `{category}` | اطمینان: `{confidence:.0%}`
 🤖 مدل: `{model}`
-📥 توکن ورودی: `{input_tokens}` | 📤 توکن خروجی: `{output_tokens}`
+{token_info}{reranker_info}
 ---
 
 """
@@ -643,13 +657,18 @@ async def process_query_enhanced(
             web_search_warning = "\n\n---\n⚠️ **توجه:** برای پاسخ دقیق‌تر به این سوال، نیاز به جستجوی اینترنت بود که در تنظیمات شما غیرفعال است. برای دریافت اطلاعات به‌روزتر، لطفاً جستجوی وب را در تنظیمات فعال کنید."
             answer_with_warning = rag_response.answer + web_search_warning
         
+        # استخراج امتیازات reranker از chunks
+        reranker_scores = [chunk.score for chunk in rag_response.chunks] if rag_response.chunks else []
+        
         final_answer = add_debug_info(
             answer=answer_with_warning,
             category=classification.category,
             model=model_display,
             input_tokens=rag_response.input_tokens,
             output_tokens=rag_response.output_tokens,
-            confidence=classification.confidence
+            confidence=classification.confidence,
+            cached=rag_response.cached,
+            reranker_scores=reranker_scores
         )
         
         return QueryResponse(

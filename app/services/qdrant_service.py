@@ -317,6 +317,59 @@ class QdrantService:
             logger.error(f"Search failed: {e}")
             raise
     
+    def _extract_metadata_keywords(self, query_text: str) -> Dict[str, Any]:
+        """
+        Extract metadata-based keywords from query for filtering.
+        
+        Extracts patterns like:
+        - "ماده X" -> unit_number filter
+        - "قانون X" -> work_title filter  
+        - "تبصره X" -> unit_type + unit_number filter
+        
+        Args:
+            query_text: Query text
+            
+        Returns:
+            Dictionary of metadata filters
+        """
+        import re
+        
+        filters = {}
+        
+        # Extract article numbers: "ماده 5", "ماده ۵"
+        article_pattern = r'ماده\s*[‌\s]*(\d+|[۰-۹]+)'
+        article_match = re.search(article_pattern, query_text)
+        if article_match:
+            num = article_match.group(1)
+            # Convert Persian digits to English
+            persian_digits = '۰۱۲۳۴۵۶۷۸۹'
+            for i, pd in enumerate(persian_digits):
+                num = num.replace(pd, str(i))
+            filters['extracted_article'] = num
+        
+        # Extract note numbers: "تبصره 1", "تبصره ۱"
+        note_pattern = r'تبصره\s*[‌\s]*(\d+|[۰-۹]+)'
+        note_match = re.search(note_pattern, query_text)
+        if note_match:
+            num = note_match.group(1)
+            persian_digits = '۰۱۲۳۴۵۶۷۸۹'
+            for i, pd in enumerate(persian_digits):
+                num = num.replace(pd, str(i))
+            filters['extracted_note'] = num
+        
+        # Extract law names (common patterns)
+        law_patterns = [
+            r'قانون\s+([^،\.\؟\?]+?)(?:\s+مصوب|\s+ماده|\s*$)',
+            r'آیین\s*نامه\s+([^،\.\؟\?]+?)(?:\s+مصوب|\s+ماده|\s*$)',
+        ]
+        for pattern in law_patterns:
+            law_match = re.search(pattern, query_text)
+            if law_match:
+                filters['extracted_law'] = law_match.group(1).strip()
+                break
+        
+        return filters
+    
     async def hybrid_search(
         self,
         query_vector: List[float],
@@ -328,44 +381,96 @@ class QdrantService:
         vector_field: str = "default"
     ) -> List[Dict[str, Any]]:
         """
-        Perform hybrid search combining vector and keyword search.
+        Perform hybrid search combining vector search with metadata-based filtering.
         
-        NOTE: Qdrant's keyword search با FieldCondition.match فقط exact match را پشتیبانی می‌کند
-        و برای full-text search مناسب نیست. در حال حاضر فقط از vector search استفاده می‌کنیم.
+        Strategy:
+        1. Extract metadata keywords from query (article numbers, law names)
+        2. Perform vector search with lower threshold for better recall
+        3. Boost results that match extracted metadata
+        4. Combine and deduplicate results
         
         Args:
             query_vector: Query embedding vector
-            query_text: Query text for keyword search (currently unused)
+            query_text: Query text for metadata extraction
             limit: Maximum number of results
-            vector_weight: Weight for vector search results (currently 1.0)
-            keyword_weight: Weight for keyword search results (currently 0.0)
+            vector_weight: Weight for vector search results
+            keyword_weight: Weight for metadata match boost
             filters: Optional filters
             vector_field: Which vector field to search
             
         Returns:
-            Search results (currently vector-only)
+            Combined and scored search results
         """
         try:
-            # فعلاً فقط از vector search استفاده می‌کنیم
-            # چون keyword search در Qdrant برای فارسی مناسب نیست
+            # Extract metadata keywords from query
+            extracted = self._extract_metadata_keywords(query_text)
+            
             logger.debug(
-                "Hybrid search called (using vector-only for now)",
+                "Hybrid search with metadata extraction",
                 query_text=query_text[:50],
+                extracted_keywords=extracted,
                 limit=limit
             )
             
-            # Vector search با threshold پایین‌تر
+            # Vector search with lower threshold for better recall
             vector_results = await self.search(
                 query_vector=query_vector,
-                limit=limit,
-                score_threshold=0.4,  # Lower threshold for better recall
+                limit=limit * 2,  # Get more results for filtering
+                score_threshold=0.4,
                 filters=filters,
                 vector_field=vector_field
             )
             
-            # Return vector results as-is
-            # در آینده می‌توانیم BM25 یا full-text search خارجی اضافه کنیم
-            return vector_results
+            if not vector_results:
+                return []
+            
+            # Boost scores based on metadata matches
+            for result in vector_results:
+                metadata = result.get("metadata", {})
+                boost = 0.0
+                
+                # Boost if article number matches
+                if extracted.get('extracted_article'):
+                    path_label = metadata.get("path_label", "")
+                    if f"ماده {extracted['extracted_article']}" in path_label:
+                        boost += keyword_weight * 0.5
+                    # Also check unit_number for articles
+                    if metadata.get("unit_type") == "article" and metadata.get("unit_number") == extracted['extracted_article']:
+                        boost += keyword_weight * 0.3
+                
+                # Boost if note number matches
+                if extracted.get('extracted_note'):
+                    path_label = metadata.get("path_label", "")
+                    if f"تبصره {extracted['extracted_note']}" in path_label:
+                        boost += keyword_weight * 0.4
+                    if metadata.get("unit_type") == "note" and metadata.get("unit_number") == extracted['extracted_note']:
+                        boost += keyword_weight * 0.2
+                
+                # Boost if law name matches
+                if extracted.get('extracted_law'):
+                    work_title = metadata.get("work_title", "")
+                    if extracted['extracted_law'] in work_title:
+                        boost += keyword_weight * 0.6
+                
+                # Apply boost to score
+                original_score = result["score"]
+                result["score"] = (original_score * vector_weight) + boost
+                result["metadata"]["_hybrid_boost"] = boost
+                result["metadata"]["_original_score"] = original_score
+            
+            # Sort by combined score and limit
+            vector_results.sort(key=lambda x: x["score"], reverse=True)
+            final_results = vector_results[:limit]
+            
+            logger.debug(
+                "Hybrid search completed",
+                total_candidates=len(vector_results),
+                returned=len(final_results),
+                top_score=final_results[0]["score"] if final_results else 0,
+                boosted_count=sum(1 for r in final_results if r.get("metadata", {}).get("_hybrid_boost", 0) > 0)
+            )
+            
+            return final_results
             
         except Exception as e:
             logger.error(f"Hybrid search failed: {e}")

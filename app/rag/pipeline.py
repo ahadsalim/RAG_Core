@@ -14,6 +14,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.services.qdrant_service import QdrantService
 from app.services.embedding_service import get_embedding_service  # Unified embedding service
+from app.services.reranker_service import get_reranker
 from app.llm.openai_provider import OpenAIProvider
 from app.llm.base import Message, LLMConfig
 from app.llm.classifier import QueryClassifier
@@ -74,8 +75,11 @@ class RAGPipeline:
         # استفاده از LLM2 (Pro) برای سوالات کسب‌وکار
         self.llm = create_llm2_pro()
         self.classifier = QueryClassifier()  # LLM برای دسته‌بندی سوالات
-        self.reranker = None  # Will be initialized if needed
-        logger.info("RAG Pipeline initialized with LLM2 (Pro)")
+        self.reranker = get_reranker()  # Initialize Cohere reranker if configured
+        if self.reranker:
+            logger.info("RAG Pipeline initialized with LLM2 (Pro) and Cohere Reranker")
+        else:
+            logger.info("RAG Pipeline initialized with LLM2 (Pro) (no reranker)")
         
     async def process(self, query: RAGQuery, additional_context: str = None, skip_classification: bool = False) -> RAGResponse:
         """

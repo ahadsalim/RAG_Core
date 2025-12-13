@@ -11,7 +11,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
-from prometheus_fastapi_instrumentator import Instrumentator
 import structlog
 
 from app.config.settings import settings
@@ -83,11 +82,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Setup Prometheus metrics (before startup)
-if settings.prometheus_enabled:
-    instrumentator = Instrumentator()
-    instrumentator.instrument(app).expose(app, endpoint="/metrics")
-    logger.info("Prometheus metrics configured")
 
 # Add middleware
 # CORS

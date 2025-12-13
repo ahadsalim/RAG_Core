@@ -214,7 +214,7 @@ class RAGPipeline:
                 enable_web_search=query.enable_web_search
             )
             
-            # Step 6: Extract sources (unless LLM indicated no sources should be shown)
+            # Step 6: Extract sources (filter based on LLM's decision)
             # اگر LLM تشخیص داد که قانون/ماده وجود ندارد، منابع نمایش داده نشوند
             if answer.startswith("[NO_SOURCES]"):
                 # حذف تگ از پاسخ و خالی کردن منابع
@@ -223,7 +223,34 @@ class RAGPipeline:
                 chunks = []
                 logger.info("LLM indicated no sources should be shown (non-existent law/article)")
             else:
-                sources = self._extract_sources(chunks)
+                # استخراج منابع استفاده شده توسط LLM
+                answer, used_source_indices = self._extract_used_sources(answer)
+                
+                if used_source_indices is not None:
+                    if len(used_source_indices) == 0:
+                        # LLM گفته هیچ منبعی استفاده نشده
+                        chunks = []
+                        sources = []
+                        logger.info("LLM indicated no sources were used")
+                    else:
+                        # فیلتر chunks بر اساس منابع استفاده شده
+                        filtered_chunks = []
+                        for idx in used_source_indices:
+                            if 0 < idx <= len(chunks):
+                                filtered_chunks.append(chunks[idx - 1])  # تبدیل 1-indexed به 0-indexed
+                        
+                        logger.info(
+                            "Filtered sources based on LLM decision",
+                            original_count=len(chunks),
+                            used_indices=used_source_indices,
+                            filtered_count=len(filtered_chunks)
+                        )
+                        chunks = filtered_chunks
+                        sources = self._extract_sources(chunks)
+                else:
+                    # اگر LLM تگ را ننوشت، همه منابع را نگه می‌داریم (backward compatibility)
+                    sources = self._extract_sources(chunks)
+                    logger.warning("LLM did not specify used sources, keeping all")
             
             # Calculate processing time
             processing_time = int(
@@ -796,6 +823,45 @@ class RAGPipeline:
             sources.append(source)
         
         return sources
+    
+    def _extract_used_sources(self, answer: str) -> Tuple[str, Optional[List[int]]]:
+        """
+        استخراج شماره منابع استفاده شده از پاسخ LLM.
+        
+        Args:
+            answer: پاسخ LLM که ممکن است شامل تگ [USED_SOURCES: ...] باشد
+            
+        Returns:
+            Tuple of (cleaned_answer, list_of_source_indices)
+            - اگر تگ پیدا نشد: (answer, None)
+            - اگر NONE بود: (cleaned_answer, [])
+            - در غیر این صورت: (cleaned_answer, [1, 3, 5, ...])
+        """
+        import re
+        
+        # الگوی جستجو برای تگ USED_SOURCES
+        pattern = r'\[USED_SOURCES:\s*([^\]]+)\]'
+        match = re.search(pattern, answer, re.IGNORECASE)
+        
+        if not match:
+            return answer, None
+        
+        # حذف تگ از پاسخ
+        cleaned_answer = re.sub(pattern, '', answer, flags=re.IGNORECASE).strip()
+        
+        # استخراج محتوای تگ
+        content = match.group(1).strip().upper()
+        
+        if content == 'NONE':
+            return cleaned_answer, []
+        
+        # استخراج اعداد
+        try:
+            indices = [int(x.strip()) for x in content.split(',') if x.strip().isdigit()]
+            return cleaned_answer, indices
+        except ValueError:
+            logger.warning(f"Could not parse USED_SOURCES content: {content}")
+            return cleaned_answer, None
     
     def _get_vector_field(self, dim: int) -> str:
         """Get vector field name based on dimension."""

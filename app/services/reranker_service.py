@@ -1,10 +1,11 @@
 """
 Reranker Service
-Supports both local (sentence-transformers) and API-based (Cohere) reranking
+Supports local reranker service (Docker container) and Cohere API
 """
 
-from typing import List, Tuple, Optional, Protocol
+from typing import List, Tuple, Optional
 from abc import ABC, abstractmethod
+import httpx
 import structlog
 
 from app.config.settings import settings
@@ -37,32 +38,18 @@ class BaseReranker(ABC):
 
 
 class LocalReranker(BaseReranker):
-    """Local reranker using sentence-transformers CrossEncoder."""
+    """Local reranker using standalone Docker service."""
     
-    def __init__(self, model_name: str = None):
+    def __init__(self, service_url: str = None):
         """
-        Initialize local reranker with CrossEncoder model.
+        Initialize local reranker client.
         
-        Recommended models:
-        - BAAI/bge-reranker-v2-m3 (multilingual, best for Persian)
-        - BAAI/bge-reranker-base (English focused)
-        - mixedbread-ai/mxbai-rerank-base-v1 (good multilingual)
+        Args:
+            service_url: URL of the reranker service (default: http://reranker:8100)
         """
-        from sentence_transformers import CrossEncoder
-        import torch
-        
-        self.model_name = model_name or settings.reranking_model
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        logger.info(f"Loading local reranker model: {self.model_name} on {self.device}")
-        
-        self.model = CrossEncoder(
-            self.model_name,
-            max_length=512,
-            device=self.device
-        )
-        
-        logger.info(f"Local Reranker initialized: {self.model_name}")
+        self.service_url = service_url or settings.reranker_service_url
+        self.timeout = 30.0
+        logger.info(f"Local Reranker initialized: {self.service_url}")
     
     async def rerank(
         self,
@@ -70,25 +57,27 @@ class LocalReranker(BaseReranker):
         documents: List[str],
         top_k: Optional[int] = None
     ) -> List[Tuple[int, float]]:
-        """Rerank documents using local CrossEncoder model."""
+        """Rerank documents using local reranker service."""
         if not documents:
             return []
         
         top_k = top_k or len(documents)
         
         try:
-            # Create query-document pairs
-            pairs = [[query, doc] for doc in documents]
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.service_url}/rerank",
+                    json={
+                        "query": query,
+                        "documents": documents,
+                        "top_k": top_k
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
             
-            # Get scores from CrossEncoder
-            scores = self.model.predict(pairs, show_progress_bar=False)
-            
-            # Create (index, score) tuples and sort by score descending
-            indexed_scores = list(enumerate(scores))
-            indexed_scores.sort(key=lambda x: x[1], reverse=True)
-            
-            # Return top_k results
-            results = [(idx, float(score)) for idx, score in indexed_scores[:top_k]]
+            # Extract results
+            results = [(r["index"], r["score"]) for r in data["results"]]
             
             logger.debug(
                 "Local reranking completed",
@@ -100,6 +89,9 @@ class LocalReranker(BaseReranker):
             
             return results
             
+        except httpx.ConnectError:
+            logger.warning("Reranker service not available, skipping reranking")
+            return [(i, 1.0) for i in range(min(top_k, len(documents)))]
         except Exception as e:
             logger.error(f"Local reranking failed: {e}")
             raise
@@ -165,7 +157,7 @@ def get_reranker() -> Optional[BaseReranker]:
     
     Priority:
     1. If COHERE_API_KEY is set and reranking_model starts with 'rerank-' -> Cohere
-    2. If reranking_model is a HuggingFace model path -> Local CrossEncoder
+    2. If reranker_service_url is configured -> Local Docker service
     3. None if no valid configuration
     """
     model = settings.reranking_model
@@ -177,10 +169,10 @@ def get_reranker() -> Optional[BaseReranker]:
         except Exception as e:
             logger.warning(f"Failed to initialize Cohere reranker: {e}")
     
-    # Check if it's a local model (HuggingFace path format)
-    if "/" in model or model.startswith("BAAI") or model.startswith("mixedbread"):
+    # Check if local reranker service is configured
+    if settings.reranker_service_url:
         try:
-            return LocalReranker(model)
+            return LocalReranker(settings.reranker_service_url)
         except Exception as e:
             logger.warning(f"Failed to initialize local reranker: {e}")
     

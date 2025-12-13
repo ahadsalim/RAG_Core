@@ -177,11 +177,12 @@ class Settings(BaseSettings):
     embedding_api_key: Optional[str] = Field(default=None, description="API Key for embeddings (if different)")
     embedding_base_url: Optional[str] = Field(default=None, description="Base URL for embeddings (if different)")
     
-    # Reranking (Local or Cohere API)
-    # Local models: BAAI/bge-reranker-v2-m3, mixedbread-ai/mxbai-rerank-base-v1
-    # Cohere models: rerank-multilingual-v2.0 (requires cohere_api_key)
+    # Reranking (Local Docker service or Cohere API)
+    # Local: Set reranker_service_url to use local Docker reranker service
+    # Cohere: Set cohere_api_key and reranking_model to rerank-multilingual-v2.0
     cohere_api_key: Optional[str] = Field(default=None)
-    reranking_model: str = Field(default="BAAI/bge-reranker-v2-m3", description="Reranking model (local HuggingFace or Cohere)")
+    reranker_service_url: Optional[str] = Field(default="http://reranker:8100", description="URL of local reranker service")
+    reranking_model: str = Field(default="BAAI/bge-reranker-v2-m3", description="Reranking model name")
     reranking_top_k: int = Field(default=10, ge=1)
     
     # OCR Settings

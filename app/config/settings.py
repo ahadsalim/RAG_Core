@@ -203,6 +203,11 @@ class Settings(BaseSettings):
     rag_vector_weight: float = Field(default=0.7, ge=0.0, le=1.0)
     enable_rag_web_search: bool = Field(default=True, description="Enable web search to supplement RAG sources (RAG has priority)")
     
+    # RAG Retrieval Tuning
+    rag_max_chunks: int = Field(default=5, ge=1, le=20, description="تعداد chunks نهایی به LLM")
+    rag_retrieve_multiplier: int = Field(default=3, ge=1, le=10, description="ضریب برای chunks اولیه از vector search")
+    rag_reranker_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="حداقل امتیاز reranker برای نگه داشتن chunk")
+    
     # Search Settings
     search_max_results: int = Field(default=50, ge=1)
     search_timeout: int = Field(default=30, ge=1)

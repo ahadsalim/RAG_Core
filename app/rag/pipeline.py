@@ -32,12 +32,17 @@ class RAGQuery:
     user_id: str
     conversation_id: Optional[str] = None
     language: str = "fa"
-    max_chunks: int = 5
+    max_chunks: int = None  # اگر None باشد از settings.rag_max_chunks استفاده می‌شود
     filters: Optional[Dict[str, Any]] = None
     use_cache: bool = True
     use_reranking: bool = True
     user_preferences: Optional[Dict[str, Any]] = None
     enable_web_search: bool = False
+    
+    def __post_init__(self):
+        """Set default values from settings if not provided."""
+        if self.max_chunks is None:
+            self.max_chunks = settings.rag_max_chunks
 
 
 @dataclass
@@ -164,11 +169,13 @@ class RAGPipeline:
             query_embedding = await self._generate_embedding(enhanced_query)
             
             # Step 3: Retrieve relevant chunks
+            # استفاده از ضریب تنظیم‌شده در settings برای تعداد chunks اولیه
+            retrieve_limit = query.max_chunks * settings.rag_retrieve_multiplier
             chunks = await self._retrieve_chunks(
                 query_embedding,
                 enhanced_query,
                 query.filters,
-                limit=query.max_chunks * 3  # Get more for reranking
+                limit=retrieve_limit
             )
             
             logger.info(
@@ -514,9 +521,13 @@ class RAGPipeline:
                         "text_preview": chunk.text[:100] + "..." if len(chunk.text) > 100 else chunk.text
                     })
                 
-                # Reorder chunks based on reranking - فقط top_k
+                # Reorder chunks based on reranking - فقط top_k با اعمال threshold
+                threshold = settings.rag_reranker_threshold
                 reranked_chunks = []
                 for idx, score in reranked[:top_k]:
+                    # اگر threshold تنظیم شده، chunks با امتیاز کمتر را حذف کن
+                    if threshold > 0 and score < threshold:
+                        continue
                     chunk = chunks[idx]
                     chunk.score = score  # Update score with rerank score
                     reranked_chunks.append(chunk)
@@ -525,6 +536,8 @@ class RAGPipeline:
                     "Reranking completed",
                     original_count=len(chunks),
                     reranked_count=len(reranked_chunks),
+                    threshold=threshold,
+                    filtered_by_threshold=top_k - len(reranked_chunks),
                     all_scores=[d["score"] for d in reranker_details],
                     top_scores=[c.score for c in reranked_chunks[:3]]
                 )

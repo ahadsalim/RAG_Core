@@ -103,7 +103,7 @@ class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=settings.max_query_length)
     conversation_id: Optional[str] = None
     language: str = Field(default="fa", pattern="^(fa|en|ar)$")
-    max_results: int = Field(default=5, ge=1, le=20)
+    max_results: int = Field(default=settings.rag_max_chunks, ge=1, le=20)
     filters: Optional[Dict[str, Any]] = None
     use_cache: bool = True
     use_reranking: bool = True

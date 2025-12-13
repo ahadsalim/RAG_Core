@@ -505,8 +505,29 @@ async def process_query_enhanced(
         )
         
         # ========== مرحله 7: پردازش با RAG Pipeline ==========
-        # تعیین وضعیت web search: اگر کاربر مشخص کرده از آن استفاده کن، وگرنه از تنظیمات سرور
-        web_search_enabled = request.enable_web_search if request.enable_web_search is not None else settings.enable_rag_web_search
+        # تعیین وضعیت web search:
+        # 1. Classifier تصمیم نهایی را می‌گیرد (needs_web_search)
+        # 2. اگر کاربر enable_web_search=false فرستاده، حتی اگر classifier بگوید true، غیرفعال می‌شود
+        # 3. اگر کاربر enable_web_search=true فرستاده ولی classifier بگوید false، غیرفعال می‌ماند (classifier اولویت دارد)
+        # 4. اگر کاربر چیزی نفرستاده، فقط تصمیم classifier ملاک است
+        
+        # تصمیم classifier
+        classifier_wants_web_search = classification.needs_web_search
+        
+        # تصمیم نهایی: classifier باید بگوید نیاز است AND کاربر نباید صریحاً غیرفعال کرده باشد
+        if request.enable_web_search is False:
+            # کاربر صریحاً غیرفعال کرده
+            web_search_enabled = False
+        else:
+            # classifier تصمیم می‌گیرد
+            web_search_enabled = classifier_wants_web_search
+        
+        logger.info(
+            "Web search decision",
+            classifier_decision=classifier_wants_web_search,
+            user_preference=request.enable_web_search,
+            final_decision=web_search_enabled
+        )
         
         rag_query = RAGQuery(
             text=search_query,  # فقط سوال اصلی برای embedding
@@ -518,7 +539,7 @@ async def process_query_enhanced(
             use_cache=request.use_cache,
             use_reranking=request.use_reranking,
             user_preferences=request.user_preferences,
-            enable_web_search=web_search_enabled  # Web search بر اساس تنظیم کاربر یا سرور
+            enable_web_search=web_search_enabled  # Web search بر اساس تصمیم classifier و ترجیح کاربر
         )
         
         pipeline = RAGPipeline()

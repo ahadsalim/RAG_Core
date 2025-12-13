@@ -59,8 +59,10 @@ LLM2_API_KEY = os.getenv("LLM2_API_KEY", "sk-proj-kKLkYz7Ja90xyP2Fldy5F5M0Dak-67
 LLM2_BASE_URL = os.getenv("LLM2_BASE_URL", "https://api.openai.com/v1")
 LLM2_MODEL = os.getenv("LLM2_MODEL", "gpt-4o")  # برای تولید سوالات
 
-# GPT-5.2 for final analysis (expensive - use sparingly)
-GPT52_MODEL = "o3-mini"  # مدل گران برای تحلیل نهایی
+# ============================================================================
+# مدل تحلیل نهایی (گران - فقط یکبار در انتها استفاده می‌شود)
+# ============================================================================
+ANALYSIS_MODEL = "gpt-5.2"  # مدل پیشرفته برای تحلیل نهایی نتایج
 
 # Output paths
 OUTPUT_DIR = Path(__file__).parent
@@ -388,7 +390,7 @@ class ComprehensiveTestRunner:
 
         try:
             response = self.llm_client.chat.completions.create(
-                model=GPT52_MODEL,
+                model=ANALYSIS_MODEL,
                 messages=[
                     {"role": "system", "content": "شما یک متخصص امنیت و کیفیت نرم‌افزار هستید."},
                     {"role": "user", "content": prompt}
@@ -526,7 +528,7 @@ class ComprehensiveTestRunner:
 ## 🔧 اطلاعات فنی
 
 - **URL سرور:** {BASE_URL}
-- **مدل تحلیل:** {GPT52_MODEL}
+- **مدل تحلیل:** {ANALYSIS_MODEL}
 - **زمان اجرا:** {(datetime.now() - self.start_time).total_seconds():.0f} ثانیه
 
 ---

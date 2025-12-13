@@ -203,6 +203,7 @@ class Settings(BaseSettings):
     rag_use_hybrid_search: bool = Field(default=True)
     rag_bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)
     rag_vector_weight: float = Field(default=0.7, ge=0.0, le=1.0)
+    enable_rag_web_search: bool = Field(default=True, description="Enable web search to supplement RAG sources (RAG has priority)")
     
     # Search Settings
     search_max_results: int = Field(default=50, ge=1)

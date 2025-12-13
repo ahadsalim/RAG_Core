@@ -510,7 +510,8 @@ async def process_query_enhanced(
             filters=request.filters,
             use_cache=request.use_cache,
             use_reranking=request.use_reranking,
-            user_preferences=request.user_preferences
+            user_preferences=request.user_preferences,
+            enable_web_search=settings.enable_rag_web_search  # Web search برای تکمیل RAG
         )
         
         pipeline = RAGPipeline()
@@ -598,10 +599,14 @@ async def process_query_enhanced(
         processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
         
         # اضافه کردن اطلاعات دیباگ به پاسخ RAG
+        model_display = rag_response.model_used or settings.llm2_model
+        if settings.enable_rag_web_search:
+            model_display = f"{model_display} (web_search)"
+        
         final_answer = add_debug_info(
             answer=rag_response.answer,
             category=classification.category,
-            model=rag_response.model_used or settings.llm2_model,
+            model=model_display,
             input_tokens=rag_response.input_tokens,
             output_tokens=rag_response.output_tokens,
             confidence=classification.confidence

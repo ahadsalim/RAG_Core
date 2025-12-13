@@ -36,6 +36,7 @@ class RAGQuery:
     use_cache: bool = True
     use_reranking: bool = True
     user_preferences: Optional[Dict[str, Any]] = None
+    enable_web_search: bool = False
 
 
 @dataclass
@@ -205,7 +206,8 @@ class RAGPipeline:
                 query.language,
                 query.conversation_id,
                 query.user_preferences,
-                additional_context=additional_context
+                additional_context=additional_context,
+                enable_web_search=query.enable_web_search
             )
             
             # Step 6: Extract sources
@@ -478,8 +480,9 @@ class RAGPipeline:
         language: str,
         conversation_id: Optional[str],
         user_preferences: Optional[Dict[str, Any]] = None,
-        additional_context: str = None
-    ) -> Tuple[str, int]:
+        additional_context: str = None,
+        enable_web_search: bool = False
+    ) -> Tuple[str, int, int, int]:
         """
         Generate answer using LLM with retrieved context.
         
@@ -490,9 +493,10 @@ class RAGPipeline:
             conversation_id: Optional conversation ID for context
             user_preferences: Optional user preferences for response customization
             additional_context: Additional context (memory, file analysis, etc.)
+            enable_web_search: Enable web search to supplement RAG sources
             
         Returns:
-            Generated answer and tokens used
+            Tuple of (answer, total_tokens, input_tokens, output_tokens)
         """
         # Build context from chunks
         context_parts = []
@@ -553,11 +557,15 @@ class RAGPipeline:
             # TODO: Load conversation history from database
             pass
         
-        # Generate response با Responses API
-        response = await self.llm.generate_responses_api(
-            messages,
-            reasoning_effort="medium"
-        )
+        # Generate response - با یا بدون web search
+        if enable_web_search:
+            logger.info("Generating RAG answer with web search enabled")
+            response = await self.llm.generate_with_web_search(messages)
+        else:
+            response = await self.llm.generate_responses_api(
+                messages,
+                reasoning_effort="medium"
+            )
         
         # برگرداندن توکن‌های ورودی و خروجی به صورت جداگانه
         input_tokens = response.usage.get("prompt_tokens", 0)

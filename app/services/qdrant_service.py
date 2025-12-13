@@ -289,14 +289,15 @@ class QdrantService:
             # Perform search
             search_filter = Filter(must=filter_conditions) if filter_conditions else None
             
-            results = self.client.search(
+            results = self.client.query_points(
                 collection_name=self.collection_name,
-                query_vector=(vector_field, query_vector),
+                query=query_vector,
+                using=vector_field,
                 limit=limit,
                 score_threshold=score_threshold,
                 query_filter=search_filter,
                 with_payload=True,
-            )
+            ).points
             
             # Format results
             formatted_results = []

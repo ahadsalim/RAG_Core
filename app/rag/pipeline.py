@@ -552,11 +552,6 @@ class RAGPipeline:
             Message(role="user", content=user_message)
         ]
         
-        # Add conversation history if available
-        if conversation_id:
-            # TODO: Load conversation history from database
-            pass
-        
         # Generate response - با یا بدون web search
         if enable_web_search:
             logger.info("Generating RAG answer with web search enabled")
@@ -833,8 +828,6 @@ class RAGPipeline:
                     model_used=data.get("model_used", "")
                 )
             
-            # TODO: Check database cache for semantic similarity
-            
         except Exception as e:
             logger.warning(f"Cache check failed: {e}")
         
@@ -884,8 +877,6 @@ class RAGPipeline:
                 settings.cache_ttl_query,
                 json.dumps(cache_data, ensure_ascii=False)
             )
-            
-            # TODO: Also cache in database for semantic search
             
         except Exception as e:
             logger.warning(f"Cache save failed: {e}")

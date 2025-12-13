@@ -52,11 +52,6 @@ class UserProfile(BaseModel):
     language: Mapped[str] = mapped_column(String(10), default="fa")
     timezone: Mapped[str] = mapped_column(String(50), default="Asia/Tehran")
     
-    # Feature flags
-    voice_search_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    image_search_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    streaming_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    
     # Statistics
     last_active_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     total_tokens_used: Mapped[int] = mapped_column(Integer, default=0)

@@ -1,6 +1,6 @@
 # 🚀 Core RAG System
 
-سیستم مرکزی - مغز هوش مصنوعی پروژه RAG برای پاسخگویی هوشمند به سوالات حقوقی
+سیستم مرکزی - مغز هوش مصنوعی پروژه RAG برای پاسخگویی هوشمند به سوالات حقوقی و کسب‌وکار
 
 ## 📋 فهرست
 
@@ -8,41 +8,41 @@
 - [ویژگی‌ها](#ویژگیها)
 - [نصب سریع](#نصب-سریع)
 - [ساختار پروژه](#ساختار-پروژه)
-- [مستندات](#مستندات)
+- [API Endpoints](#api-endpoints)
 - [پورت‌ها](#پورتها)
 
 ## معرفی
 
 سیستم Core یک پلتفرم RAG (Retrieval-Augmented Generation) کامل است که:
-- جستجوی معنایی در پایگاه دانش حقوقی
-- تولید پاسخ با LLM (OpenAI, Anthropic)
-- مدیریت مکالمات و تاریخچه کاربران
+- جستجوی معنایی در پایگاه دانش حقوقی با Qdrant
+- تولید پاسخ با LLM (OpenAI با fallback به GapGPT)
+- دسته‌بندی هوشمند سوالات (general, business, invalid)
+- مدیریت مکالمات و حافظه بلندمدت کاربران
+- جستجوی وب برای سوالات عمومی و تکمیل RAG
 - همگام‌سازی با سیستم Ingest
 
 ## ویژگی‌ها
 
 ### 🎯 ویژگی‌های اصلی
-- ✅ RAG Pipeline کامل با Qdrant
-- ✅ Multi-LLM Support (OpenAI, Anthropic, Local)
-- ✅ Hybrid Search (Vector + Keyword)
-- ✅ Re-ranking با Cohere
-- ✅ Semantic Cache برای سرعت بیشتر
-- ✅ User Management & Authentication
+- ✅ RAG Pipeline کامل با Qdrant Vector Database
+- ✅ Multi-LLM با Fallback (OpenAI → GapGPT)
+- ✅ Query Classification (general, business, invalid)
+- ✅ Web Search برای سوالات عمومی
+- ✅ Long-term Memory برای کاربران
 - ✅ Conversation History
-- ✅ API-First Architecture
+- ✅ File Analysis (PDF, Word, Images)
+- ✅ Redis Cache برای سرعت بیشتر
 
 ### 🛡️ امنیت
 - JWT Authentication
 - API Key Verification
 - Rate Limiting
 - Input Validation
-- Audit Logging
 
 ### 📊 مانیتورینگ
-- Prometheus Metrics
-- Structured Logging
+- Structured Logging (structlog)
 - Health Checks
-- Admin Dashboard
+- Celery Task Monitoring (Flower)
 
 ## نصب سریع
 
@@ -60,18 +60,19 @@ cd /home/ahad/project/core/deployment
 2. API Keys را تنظیم می‌کند
 3. همه چیز را به طور خودکار نصب می‌کند
 
-### روش 2: نصب دستی
+### روش 2: نصب دستی با Docker Compose
 
 ```bash
 # 1. تنظیم environment
 cp deployment/config/.env.example .env
 nano .env  # اضافه کردن API keys
 
-# 2. Development
-./deployment/deploy_development.sh
+# 2. اجرا با Docker Compose
+cd deployment/docker
+docker-compose up -d
 
-# 3. Production
-sudo ./deployment/deploy_production.sh
+# 3. بررسی وضعیت
+docker-compose ps
 ```
 
 ## ساختار پروژه
@@ -80,9 +81,8 @@ sudo ./deployment/deploy_production.sh
 core/
 ├── deployment/              # 🚀 اسکریپت‌های نصب
 │   ├── start.sh            # اسکریپت شروع سریع
-│   ├── backup_manager.sh   # مدیریت backup/restore
-│   ├── deploy_development.sh
-│   ├── deploy_production.sh
+│   ├── manage.sh           # مدیریت سرویس‌ها
+│   ├── backup.sh           # مدیریت backup/restore
 │   ├── docker/
 │   │   ├── docker-compose.yml
 │   │   └── Dockerfile
@@ -90,42 +90,46 @@ core/
 │       └── .env.example
 │
 ├── app/                     # 💻 کد اصلی برنامه
-│   ├── api/                # API endpoints
+│   ├── api/v1/endpoints/   # API endpoints (query, users, sync, admin, memory)
 │   ├── core/               # Security & dependencies
-│   ├── db/                 # Database management
-│   ├── llm/                # LLM providers
-│   ├── models/             # SQLAlchemy models
+│   ├── db/                 # Database session management
+│   ├── llm/                # LLM providers (OpenAI, factory, classifier)
+│   ├── models/             # SQLAlchemy models (user, conversation)
 │   ├── rag/                # RAG pipeline
-│   ├── services/           # Business services
-│   └── utils/              # Utilities
+│   ├── services/           # Business services (qdrant, embedding, memory, storage)
+│   ├── tasks/              # Celery tasks (sync, cleanup, notifications)
+│   └── config/             # Settings & prompts
 │
 ├── document/                # 📚 مستندات
-│   ├── API_KEYS_SETUP.md
-│   ├── INGEST_INTEGRATION_GUIDE.md
-│   └── USERS_SYSTEM_NOTES.md
 │
 ├── scripts/                 # 🔧 ابزارها
-│   └── init_db.py
+│   ├── init_db.py
+│   ├── check_qdrant_data.py
+│   └── reset_qdrant_collection.py
+│
+├── test/                    # 🧪 تست‌ها
 │
 ├── alembic/                 # 🗄️ Database migrations
 │
 └── README.md               # این فایل
 ```
 
-## مستندات
+## API Endpoints
 
-### 📖 مستندات اصلی
+### 🎯 Endpoints اصلی
 
-| فایل | توضیحات |
-|------|---------|
-| **[QUICK_START.md](QUICK_START.md)** | شروع سریع در 5 دقیقه |
-| **[document/API_KEYS_SETUP.md](document/API_KEYS_SETUP.md)** | راهنمای تنظیم API Keys |
-| **[document/INGEST_INTEGRATION_GUIDE.md](document/INGEST_INTEGRATION_GUIDE.md)** | یکپارچه‌سازی با Ingest |
-| **[document/USERS_SYSTEM_NOTES.md](document/USERS_SYSTEM_NOTES.md)** | راهنمای سیستم Users |
+| Endpoint | توضیحات |
+|----------|---------|
+| `POST /api/v1/query/` | ارسال سوال و دریافت پاسخ |
+| `GET /api/v1/users/me` | اطلاعات کاربر جاری |
+| `GET /api/v1/memory/` | حافظه بلندمدت کاربر |
+| `POST /api/v1/sync/trigger` | همگام‌سازی با Ingest |
+| `GET /api/v1/admin/stats` | آمار سیستم |
+| `GET /health` | Health Check |
 
 ### 🎯 مستندات API
 
-پس از اجرا در دسترس است:
+پس از اجرا در دسترس است (در حالت debug):
 - **Swagger UI**: http://localhost:7001/docs
 - **ReDoc**: http://localhost:7001/redoc
 
@@ -180,19 +184,9 @@ curl http://localhost:7001/api/v1/admin/stats \
 ```bash
 cd /home/ahad/project/core/deployment
 
-# مدیریت backup/restore با منوی تعاملی
-./backup_manager.sh
+# مدیریت backup/restore
+./backup.sh
 ```
-
-گزینه‌های موجود:
-1. Create Manual Backup
-2. Restore from Backup
-3. Setup Automated Backup
-4. View Backups
-5. Cleanup Old Backups
-6. Setup Remote Backup Server
-7. Test Backup System
-8. Export/Import Configuration
 
 ### 📊 مانیتورینگ
 
@@ -331,15 +325,13 @@ docker-compose logs qdrant
 
 ## 🎯 Quick Links
 
-- 📖 [راهنمای شروع سریع](QUICK_START.md)
 - 🔑 [تنظیم API Keys](document/API_KEYS_SETUP.md)
 - 🔗 [یکپارچه‌سازی Ingest](document/INGEST_INTEGRATION_GUIDE.md)
 - 👥 [راهنمای Users](document/USERS_SYSTEM_NOTES.md)
-- 💾 [Backup & Restore](deployment/backup_manager.sh)
-- 🧪 [Test UI](../users/index.html)
+- 💾 [Backup & Restore](deployment/backup.sh)
 
 ---
 
 **نسخه**: 1.0.0  
-**آخرین بروزرسانی**: نوامبر 2024  
+**آخرین بروزرسانی**: دسامبر 2024  
 **وضعیت**: ✅ آماده برای Production

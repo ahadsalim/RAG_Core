@@ -163,7 +163,7 @@ class OpenAIProvider(BaseLLM):
         """Generate embeddings using OpenAI."""
         try:
             # Use specified model or default embedding model
-            embedding_model = model or settings.openai_embedding_model
+            embedding_model = model or settings.embedding_model
             
             # Batch texts if needed (OpenAI has a limit)
             batch_size = 100

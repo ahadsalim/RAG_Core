@@ -182,12 +182,6 @@ class Settings(BaseSettings):
     reranking_model: str = Field(default="rerank-multilingual-v2.0")
     reranking_top_k: int = Field(default=10, ge=1)
     
-    # Voice Processing
-    whisper_model: str = Field(default="large-v3")
-    whisper_device: Literal["cuda", "cpu"] = Field(default="cpu")
-    whisper_compute_type: str = Field(default="float16")
-    max_audio_size_mb: int = Field(default=25, ge=1)
-    
     # OCR Settings
     ocr_language: str = Field(default="fas+eng")
     tesseract_cmd: str = Field(default="/usr/bin/tesseract")
@@ -216,12 +210,6 @@ class Settings(BaseSettings):
     rate_limit_per_hour: int = Field(default=1000, ge=1)
     rate_limit_per_day: int = Field(default=10000, ge=1)
     
-    # Monitoring
-    prometheus_enabled: bool = Field(default=True)
-    prometheus_port: int = Field(default=9090)
-    sentry_dsn: Optional[str] = Field(default=None)
-    sentry_traces_sample_rate: float = Field(default=0.1, ge=0.0, le=1.0)
-    
     # File Storage (S3/MinIO)
     s3_endpoint_url: str = Field(default="http://localhost:9000")
     s3_access_key_id: str = Field(default="minioadmin")
@@ -245,35 +233,11 @@ class Settings(BaseSettings):
     users_api_url: str = Field(default="http://localhost:3001/api")
     users_api_key: Optional[str] = Field(default=None)
     
-    # Feature Flags
-    enable_voice_search: bool = Field(default=True)
-    enable_image_search: bool = Field(default=True)
-    enable_semantic_cache: bool = Field(default=True)
-    enable_audit_log: bool = Field(default=True)
-    enable_content_filter: bool = Field(default=True)
-    
-    # Content Filtering
-    content_filter_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
-    blocked_keywords: List[str] = Field(default_factory=list)
-    max_response_length: int = Field(default=10000, ge=100)
-    
-    @field_validator("blocked_keywords", mode="before")
-    def parse_blocked_keywords(cls, v):
-        if isinstance(v, str):
-            return [kw.strip() for kw in v.split(",") if kw.strip()]
-        return v
-    
     # System Limits
     max_concurrent_requests: int = Field(default=100, ge=1)
     max_history_length: int = Field(default=50, ge=1)
     max_query_length: int = Field(default=2000, ge=100)
     request_timeout: int = Field(default=60, ge=1)
-    
-    # Backup
-    backup_enabled: bool = Field(default=True)
-    backup_schedule: str = Field(default="0 2 * * *")
-    backup_retention_days: int = Field(default=30, ge=1)
-    backup_path: str = Field(default="/backups")
     
     @property
     def is_production(self) -> bool:

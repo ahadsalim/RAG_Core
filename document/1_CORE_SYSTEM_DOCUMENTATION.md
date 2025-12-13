@@ -1,7 +1,7 @@
 # مستندات کامل سیستم RAG Core
 
-**نسخه:** 1.0.0  
-**تاریخ:** 2025-11-15
+**نسخه:** 1.1.0  
+**تاریخ آخرین به‌روزرسانی:** 2025-12-13
 
 ---
 
@@ -11,10 +11,11 @@
 2. [معماری سیستم](#معماری-سیستم)
 3. [نصب و راه‌اندازی](#نصب-و-راهاندازی)
 4. [پیکربندی](#پیکربندی)
-5. [Celery و Background Tasks](#celery-و-background-tasks)
-6. [یکپارچه‌سازی](#یکپارچهسازی)
-7. [API Reference](#api-reference)
-8. [عیب‌یابی](#عیبیابی)
+5. [RAG Pipeline](#rag-pipeline)
+6. [Celery و Background Tasks](#celery-و-background-tasks)
+7. [یکپارچه‌سازی](#یکپارچهسازی)
+8. [API Reference](#api-reference)
+9. [عیب‌یابی](#عیبیابی)
 
 ---
 
@@ -104,21 +105,37 @@ docker-compose restart
 ### جریان RAG (Retrieval-Augmented Generation)
 
 ```
-1. User Query
-   ↓
-2. Query Embedding (via Ingest API)
-   ↓
-3. Vector Search (Qdrant)
-   ↓
-4. Context Retrieval
-   ↓
-5. LLM Processing (OpenAI/Anthropic)
-   ↓
-6. Response Generation
-   ↓
-7. Save to Database
-   ↓
-8. Return to User
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  1. User Query                                                               │
+│     ↓                                                                        │
+│  2. Query Classification (LLM Classifier)                                    │
+│     → تشخیص دسته: general, business, invalid                                │
+│     → تشخیص نیاز به web search                                              │
+│     ↓                                                                        │
+│  3. Query Enhancement                                                        │
+│     → بهبود query برای جستجوی بهتر                                          │
+│     ↓                                                                        │
+│  4. Query Embedding (Local multilingual-e5-large)                           │
+│     ↓                                                                        │
+│  5. Hybrid Search (Qdrant)                                                   │
+│     → Vector Search + Metadata Boost                                         │
+│     → limit = max_chunks × retrieve_multiplier                              │
+│     ↓                                                                        │
+│  6. Reranking (BAAI/bge-reranker-v2-m3)                                     │
+│     → امتیازدهی معنایی به chunks                                            │
+│     → فیلتر بر اساس threshold (حذف chunks ضعیف)                             │
+│     → انتخاب top_k بهترین                                                   │
+│     ↓                                                                        │
+│  7. LLM Processing (GPT-4o-mini / GPT-4o)                                   │
+│     → تولید پاسخ با context                                                 │
+│     → مشخص کردن منابع استفاده شده [USED_SOURCES]                           │
+│     ↓                                                                        │
+│  8. Source Filtering                                                         │
+│     → فیلتر منابع بر اساس تصمیم LLM                                         │
+│     → حذف منابع بی‌ربط                                                       │
+│     ↓                                                                        │
+│  9. Response + Relevant Sources                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### کامپوننت‌های اصلی
@@ -236,25 +253,50 @@ USERS_API_KEY=your-users-key
 
 ### تنظیمات LLM
 
-#### OpenAI
+سیستم از دو LLM مجزا استفاده می‌کند:
+
+#### LLM1 (Light) - برای سوالات عمومی
 ```bash
-OPENAI_API_KEY=sk-...
-DEFAULT_LLM_PROVIDER=openai
-DEFAULT_LLM_MODEL=gpt-4-turbo-preview
+# استفاده برای: invalid, general
+LLM1_API_KEY="sk-..."
+LLM1_BASE_URL="https://api.openai.com/v1"
+LLM1_MODEL="gpt-4o-mini"
+LLM1_MAX_TOKENS=2048
+LLM1_TEMPERATURE=0.7
+
+# Fallback
+LLM1_FALLBACK_API_KEY="..."
+LLM1_FALLBACK_BASE_URL="https://api.gapgpt.app/v1"
+LLM1_FALLBACK_MODEL="gpt-4o-mini"
 ```
 
-#### Anthropic Claude
+#### LLM2 (Pro) - برای سوالات کسب‌وکار
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...
-DEFAULT_LLM_PROVIDER=anthropic
-DEFAULT_LLM_MODEL=claude-3-opus-20240229
+# استفاده برای: business (با RAG)
+LLM2_API_KEY="sk-..."
+LLM2_BASE_URL="https://api.openai.com/v1"
+LLM2_MODEL="gpt-4o"
+LLM2_MAX_TOKENS=8192
+LLM2_TEMPERATURE=0.4
+
+# Fallback
+LLM2_FALLBACK_API_KEY="..."
+LLM2_FALLBACK_BASE_URL="https://api.gapgpt.app/v1"
+LLM2_FALLBACK_MODEL="gpt-4o"
 ```
 
-#### Local Models (HuggingFace)
+#### LLM Classification
 ```bash
-USE_LOCAL_LLM=true
-LOCAL_LLM_MODEL=meta-llama/Llama-2-7b-chat-hf
-HUGGINGFACE_TOKEN=hf_...
+# برای دسته‌بندی سوالات
+LLM_CLASSIFICATION_API_KEY="..."
+LLM_CLASSIFICATION_MODEL="gpt-4o-mini"
+LLM_CLASSIFICATION_TEMPERATURE=0.2
+```
+
+#### Timeout Settings
+```bash
+LLM_PRIMARY_TIMEOUT=30      # ثانیه - اگر primary جواب نداد، به fallback می‌رود
+LLM_WEB_SEARCH_TIMEOUT=90   # ثانیه - برای web search
 ```
 
 ### پورت‌ها
@@ -281,6 +323,103 @@ HUGGINGFACE_TOKEN=hf_...
 | Elasticsearch | 9200 |
 
 **نکته:** تمام پورت‌های Core طوری انتخاب شده‌اند که با سیستم Ingest تداخل نداشته باشند و می‌توانند روی یک سرور اجرا شوند.
+
+---
+
+## RAG Pipeline
+
+### تنظیمات RAG Retrieval
+
+```bash
+# --- RAG Retrieval Settings ---
+# تعداد chunks نهایی که به LLM داده می‌شود (پیش‌فرض: 5، حداکثر: 20)
+RAG_MAX_CHUNKS=5
+
+# ضریب برای تعداد chunks اولیه از vector search (قبل از reranking)
+# مثال: اگر MAX_CHUNKS=5 و RETRIEVE_MULTIPLIER=3 → 15 chunk از vector search گرفته می‌شود
+RAG_RETRIEVE_MULTIPLIER=3
+```
+
+### تنظیمات Reranker
+
+```bash
+# --- Reranker Settings ---
+# حداقل امتیاز reranker برای نگه داشتن chunk (0.0 تا 1.0)
+# chunks با امتیاز کمتر از این حذف می‌شوند حتی اگر در top_k باشند
+# مقدار 0.0 = بدون فیلتر (همه top_k نگه داشته می‌شوند)
+# پیشنهاد: 0.3 برای فیلتر منابع بی‌ربط
+RAG_RERANKER_THRESHOLD=0.3
+
+# سرویس محلی reranker
+RERANKER_SERVICE_URL="http://reranker:8100"
+RERANKING_MODEL="BAAI/bge-reranker-v2-m3"
+```
+
+### Hybrid Search
+
+```bash
+# فعال/غیرفعال کردن جستجوی ترکیبی
+RAG_USE_HYBRID_SEARCH=true
+
+# وزن‌دهی به نتایج
+RAG_BM25_WEIGHT=0.3      # وزن metadata match
+RAG_VECTOR_WEIGHT=0.7    # وزن vector similarity
+```
+
+**نحوه کار Hybrid Search:**
+1. استخراج metadata از query (شماره ماده، نام قانون، تبصره)
+2. Vector Search با threshold پایین‌تر برای recall بهتر
+3. Boost امتیاز نتایجی که metadata مطابقت دارند
+4. مرتب‌سازی نهایی بر اساس امتیاز ترکیبی
+
+### فیلتر منابع توسط LLM
+
+سیستم از LLM می‌خواهد که مشخص کند کدام منابع را **واقعاً** در پاسخ استفاده کرده است:
+
+```
+# در انتهای پاسخ LLM:
+[USED_SOURCES: 1, 3, 5]    # فقط منابع 1، 3 و 5 استفاده شدند
+[USED_SOURCES: NONE]       # هیچ منبعی استفاده نشد
+[NO_SOURCES]               # قانون/ماده وجود ندارد
+```
+
+**مزیت:** منابع بی‌ربط که فقط کلمات مشابه دارند به کاربر نمایش داده نمی‌شوند.
+
+### Web Search
+
+```bash
+# فعال/غیرفعال کردن web search پیش‌فرض
+ENABLE_RAG_WEB_SEARCH=false
+```
+
+**منطق Web Search:**
+- کلاسیفیر تشخیص می‌دهد که آیا به web search نیاز است
+- کاربر می‌تواند با `enable_web_search: false` آن را غیرفعال کند
+- اگر کاربر غیرفعال کرده ولی کلاسیفیر نیاز تشخیص داده، پیام هشدار نمایش داده می‌شود
+
+### راهنمای Tuning
+
+| سناریو | تغییر پیشنهادی |
+|--------|----------------|
+| پاسخ‌ها ناقص هستند | `RAG_MAX_CHUNKS=10` |
+| منابع بی‌ربط زیاد است | `RAG_RERANKER_THRESHOLD=0.4` |
+| سرعت کم است | `RAG_RETRIEVE_MULTIPLIER=2` |
+| دقت بیشتر می‌خواهید | `RAG_RETRIEVE_MULTIPLIER=5` + `RAG_MAX_CHUNKS=7` |
+
+### Debug Mode
+
+برای دیدن اطلاعات دقیق در پاسخ‌ها:
+
+```python
+# در /srv/app/api/v1/endpoints/query.py
+DEBUG_MODE = True  # برای غیرفعال کردن، False کنید
+```
+
+**اطلاعات نمایش داده شده:**
+- دسته سوال و اطمینان کلاسیفیر
+- مدل استفاده شده
+- توکن‌های ورودی/خروجی (یا "از کش")
+- امتیازات reranker برای همه chunks
 
 ---
 
@@ -344,7 +483,7 @@ send_system_notification.delay(
 )
 ```
 
-#### Cleanup Tasks (4 tasks)
+#### Cleanup Tasks (5 tasks)
 ```python
 # پاکسازی cache (هر 6 ساعت)
 cleanup_old_cache.delay()
@@ -357,6 +496,9 @@ cleanup_old_conversations.delay(days=90)
 
 # پاکسازی taskهای failed
 cleanup_failed_tasks.delay()
+
+# پاکسازی فایل‌های موقت MinIO (هر ساعت)
+cleanup_expired_temp_files.delay()
 ```
 
 #### User Tasks (4 tasks)
@@ -378,11 +520,22 @@ calculate_user_tier.delay(user_id)
 
 | Task | Schedule | توضیحات |
 |------|----------|---------|
-| `reset_all_daily_limits` | روزانه 00:00 | ریست محدودیت روزانه |
 | `cleanup_old_cache` | هر 6 ساعت | پاکسازی cache |
 | `cleanup_query_cache` | روزانه 02:00 | پاکسازی query cache |
 | `process_sync_queue` | هر 5 دقیقه | پردازش صف sync |
 | `send_usage_statistics` | هر ساعت | ارسال آمار |
+| `cleanup_expired_temp_files` | هر ساعت (دقیقه 30) | پاکسازی فایل‌های موقت MinIO |
+
+### تنظیمات فایل‌های موقت
+
+```bash
+# مدت زمان نگهداری فایل‌های موقت کاربران (ساعت)
+# بعد از این زمان فایل‌ها از S3 حذف می‌شوند
+# تحلیل فایل در حافظه گفتگو باقی می‌ماند
+TEMP_FILE_EXPIRATION_HOURS=12
+```
+
+**نکته:** task `cleanup_expired_temp_files` هر ساعت اجرا می‌شود و فایل‌های قدیمی‌تر از `TEMP_FILE_EXPIRATION_HOURS` را از bucket `temp-userfile` حذف می‌کند.
 
 ### مانیتورینگ با Flower
 
@@ -758,5 +911,35 @@ CACHE_TTL=3600
 
 ---
 
-**آخرین به‌روزرسانی:** 2025-11-15  
-**نسخه:** 1.0.0
+## تغییرات نسخه 1.1.0 (2025-12-13)
+
+### تغییرات اصلی
+- **معماری LLM دوگانه:** LLM1 (Light) برای سوالات عمومی، LLM2 (Pro) برای سوالات کسب‌وکار
+- **Fallback LLM:** اگر primary timeout شود، به fallback می‌رود
+- **فیلتر منابع توسط LLM:** LLM مشخص می‌کند کدام منابع را استفاده کرده (`[USED_SOURCES]`)
+- **Reranker Threshold:** chunks با امتیاز کمتر از threshold حذف می‌شوند
+- **تنظیمات قابل تغییر در .env:** `RAG_MAX_CHUNKS`, `RAG_RETRIEVE_MULTIPLIER`, `RAG_RERANKER_THRESHOLD`
+- **Debug Mode:** نمایش اطلاعات کامل reranker و توکن‌ها در پاسخ
+- **Web Search Control:** کلاسیفیر تصمیم می‌گیرد، کاربر می‌تواند override کند
+
+### فایل‌های کلیدی تغییر یافته
+| فایل | توضیح |
+|------|-------|
+| `/srv/app/rag/pipeline.py` | منطق RAG، reranking، فیلتر منابع |
+| `/srv/app/api/v1/endpoints/query.py` | endpoint اصلی، debug info، web search logic |
+| `/srv/app/config/prompts.py` | پرامپت‌های LLM برای RAG |
+| `/srv/app/config/settings.py` | تنظیمات جدید RAG |
+| `/srv/.env` | متغیرهای محیطی قابل تنظیم |
+| `/srv/deployment/.env.example` | نمونه فایل تنظیمات |
+
+### پرامپت RAG
+پرامپت سیستم در `/srv/app/config/prompts.py` تابع `get_rag_system_prompt_fa()`:
+- پاسخ حرفه‌ای مانند مشاور حقوقی
+- عدم ذکر تاریخ مرجع مگر در سوال باشد
+- درخواست توضیح بیشتر برای سوالات مبهم
+- مشخص کردن منابع استفاده شده با `[USED_SOURCES: ...]`
+
+---
+
+**آخرین به‌روزرسانی:** 2025-12-13  
+**نسخه:** 1.1.0

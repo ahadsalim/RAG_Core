@@ -528,6 +528,18 @@ class RAGPipeline:
         for chunk in chunks:
             metadata = chunk.metadata
             
+            # بررسی is_active (اولویت اول)
+            is_active = metadata.get("is_active")
+            
+            # برای سوالات "current": اگر is_active=False، حذف کن
+            if temporal_context == "current" and is_active is False:
+                excluded_count += 1
+                logger.debug(
+                    "Excluded chunk: is_active=False",
+                    work_title=metadata.get("work_title", "")[:30]
+                )
+                continue
+            
             # بررسی valid_from و valid_to
             valid_from_str = metadata.get("valid_from")
             valid_to_str = metadata.get("valid_to")

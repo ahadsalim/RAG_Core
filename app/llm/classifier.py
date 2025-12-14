@@ -28,6 +28,9 @@ class QueryCategory(BaseModel):
     has_meaningful_files: Optional[bool] = None  # آیا فایل‌ها معنادار هستند؟
     needs_clarification: bool = False  # آیا نیاز به توضیح بیشتر دارد؟
     needs_web_search: bool = False  # آیا نیاز به جستجوی وب دارد؟
+    # فیلدهای جدید برای فیلتر زمانی قوانین
+    temporal_context: Optional[str] = None  # "current" (حال/آینده) یا "past" (گذشته) یا null
+    target_date: Optional[str] = None  # تاریخ هدف برای گذشته (فرمت: YYYY-MM-DD یا 1397/03/15)
 
 
 class QueryClassifier:
@@ -219,7 +222,9 @@ class QueryClassifier:
                 direct_response=data.get("direct_response"),
                 has_meaningful_files=data.get("has_meaningful_files"),
                 needs_clarification=data.get("needs_clarification", False),
-                needs_web_search=data.get("needs_web_search", False)
+                needs_web_search=data.get("needs_web_search", False),
+                temporal_context=data.get("temporal_context"),
+                target_date=data.get("target_date")
             )
             
         except json.JSONDecodeError as e:

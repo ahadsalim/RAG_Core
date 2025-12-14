@@ -38,6 +38,9 @@ class RAGQuery:
     use_reranking: bool = True
     user_preferences: Optional[Dict[str, Any]] = None
     enable_web_search: bool = False
+    # فیلتر زمانی برای قوانین
+    temporal_context: Optional[str] = None  # "current" یا "past" یا None
+    target_date: Optional[str] = None  # تاریخ هدف برای گذشته (YYYY-MM-DD)
     
     def __post_init__(self):
         """Set default values from settings if not provided."""
@@ -185,6 +188,14 @@ class RAGPipeline:
                 num_chunks=len(chunks),
                 top_scores=[c.score for c in chunks[:3]] if chunks else []
             )
+            
+            # Step 3.5: فیلتر بر اساس تاریخ اعتبار قوانین
+            if query.temporal_context:
+                chunks = self._filter_chunks_by_validity(
+                    chunks,
+                    query.temporal_context,
+                    query.target_date
+                )
             
             # Step 4: Rerank if enabled
             reranker_details = []
@@ -476,6 +487,95 @@ class RAGPipeline:
         )
         
         return chunks
+    
+    def _filter_chunks_by_validity(
+        self,
+        chunks: List[RAGChunk],
+        temporal_context: Optional[str],
+        target_date: Optional[str]
+    ) -> List[RAGChunk]:
+        """
+        فیلتر chunks بر اساس تاریخ اعتبار قوانین.
+        
+        Args:
+            chunks: لیست chunks
+            temporal_context: "current" (قوانین معتبر امروز) یا "past" (قوانین معتبر در تاریخ هدف)
+            target_date: تاریخ هدف برای گذشته (YYYY-MM-DD)
+            
+        Returns:
+            chunks فیلتر شده
+        """
+        if not temporal_context:
+            return chunks
+        
+        from datetime import datetime
+        
+        # تعیین تاریخ مرجع
+        if temporal_context == "current":
+            reference_date = datetime.utcnow().date()
+        elif temporal_context == "past" and target_date:
+            try:
+                reference_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+            except ValueError:
+                logger.warning(f"Invalid target_date format: {target_date}, using current date")
+                reference_date = datetime.utcnow().date()
+        else:
+            return chunks
+        
+        filtered_chunks = []
+        excluded_count = 0
+        
+        for chunk in chunks:
+            metadata = chunk.metadata
+            
+            # بررسی valid_from و valid_to
+            valid_from_str = metadata.get("valid_from")
+            valid_to_str = metadata.get("valid_to")
+            
+            # اگر فیلد تاریخ اعتبار نداشت، نگه می‌داریم
+            if not valid_from_str:
+                filtered_chunks.append(chunk)
+                continue
+            
+            try:
+                # پارس تاریخ‌ها
+                valid_from = datetime.strptime(valid_from_str[:10], "%Y-%m-%d").date()
+                valid_to = None
+                if valid_to_str:
+                    valid_to = datetime.strptime(valid_to_str[:10], "%Y-%m-%d").date()
+                
+                # بررسی اعتبار در تاریخ مرجع
+                # قانون معتبر است اگر: valid_from <= reference_date AND (valid_to is None OR valid_to > reference_date)
+                is_valid = valid_from <= reference_date
+                if valid_to:
+                    is_valid = is_valid and valid_to > reference_date
+                
+                if is_valid:
+                    filtered_chunks.append(chunk)
+                else:
+                    excluded_count += 1
+                    logger.debug(
+                        "Excluded chunk due to validity",
+                        work_title=metadata.get("work_title", "")[:30],
+                        valid_from=valid_from_str,
+                        valid_to=valid_to_str,
+                        reference_date=str(reference_date)
+                    )
+            except (ValueError, TypeError) as e:
+                # اگر پارس تاریخ خطا داد، نگه می‌داریم
+                filtered_chunks.append(chunk)
+        
+        if excluded_count > 0:
+            logger.info(
+                "Filtered chunks by validity date",
+                temporal_context=temporal_context,
+                reference_date=str(reference_date),
+                original_count=len(chunks),
+                filtered_count=len(filtered_chunks),
+                excluded_count=excluded_count
+            )
+        
+        return filtered_chunks
     
     async def _rerank_chunks(
         self,

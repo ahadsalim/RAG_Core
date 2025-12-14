@@ -342,23 +342,28 @@ class ClassificationPrompts:
   "direct_response": "متن پاسخ یا null",
   "has_meaningful_files": true/false/null,
   "needs_clarification": true/false,
-  "needs_web_search": true/false
+  "needs_web_search": true/false,
+  "temporal_context": "current | past | null",
+  "target_date": "YYYY-MM-DD یا null"
 }
 
-**قوانین مهم direct_response:**
-- برای `invalid_no_file` و `invalid_with_file` فیلد direct_response **حتماً** باید مقدار داشته باشد (نباید null باشد)
-- برای `general`، `business_no_file` و `business_with_file` فیلد direct_response باید null باشد
+**قوانین direct_response:**
+- برای `invalid_*` → حتماً مقدار داشته باشد
+- برای بقیه → null
 
 **قوانین needs_web_search:**
-- برای دسته‌های `invalid_no_file` و `invalid_with_file` → همیشه false
-- برای دسته‌های `general`، `business_no_file` و `business_with_file`:
-  - اگر سوال نیاز به اطلاعات **به‌روز و لحظه‌ای** دارد → true
-    - مثال: قیمت‌های روز، نرخ ارز، آب‌وهوا، اخبار، رویدادهای جاری، آخرین تغییرات قوانین
-  - اگر سوال درباره **قوانین ثابت و مدون** است که در پایگاه داده موجود است → false
-    - مثال: ماده X قانون مدنی، قانون کار، قانون مالیات‌های مستقیم، بیمه تأمین اجتماعی
-  - اگر سوال درباره **اطلاعات عمومی و ثابت** است → false
-    - مثال: تعریف مفاهیم، توضیحات کلی، شعر، احوالپرسی
-- **نکته مهم:** حتی اگر کاربر درخواست جستجوی وب کرده باشد، اگر سوال نیاز به اطلاعات به‌روز ندارد، false برگردان
+- برای `invalid_*` → false
+- برای بقیه: اگر نیاز به اطلاعات **به‌روز** (قیمت، ارز، آب‌وهوا، اخبار) → true، در غیر این صورت → false
+
+**قوانین temporal_context (فقط برای business):**
+- اگر سوال درباره **وضعیت فعلی یا آینده** است → `"current"` (قوانین معتبر امروز)
+- اگر سوال درباره **گذشته** است (مثلاً فوت در سال X، قرارداد سال Y) → `"past"`
+- اگر business نیست یا زمان مشخص نیست → null
+
+**قوانین target_date (فقط وقتی temporal_context=past):**
+- تاریخ تقریبی رویداد به میلادی (YYYY-MM-DD)
+- مثال: "پدرم خرداد 1397 فوت کرد" → target_date: "2018-06-01"
+- اگر فقط سال ذکر شده → اول آن سال (مثلاً 1397 → "2018-03-21")
 
 **فقط JSON خالص برگردان.**"""
 

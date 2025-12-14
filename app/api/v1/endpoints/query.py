@@ -566,7 +566,10 @@ async def process_query_enhanced(
             use_cache=request.use_cache,
             use_reranking=request.use_reranking,
             user_preferences=request.user_preferences,
-            enable_web_search=web_search_enabled  # Web search بر اساس تصمیم classifier و ترجیح کاربر
+            enable_web_search=web_search_enabled,  # Web search بر اساس تصمیم classifier و ترجیح کاربر
+            # فیلتر زمانی بر اساس تشخیص classifier
+            temporal_context=classification.temporal_context if classification else None,
+            target_date=classification.target_date if classification else None
         )
         
         pipeline = RAGPipeline()

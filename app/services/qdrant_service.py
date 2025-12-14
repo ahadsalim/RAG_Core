@@ -452,6 +452,19 @@ class QdrantService:
                     if extracted['extracted_law'] in work_title:
                         boost += keyword_weight * 0.6
                 
+                # Boost if query keywords match tags
+                chunk_tags = metadata.get("tags", [])
+                if chunk_tags and isinstance(chunk_tags, list):
+                    query_lower = query_text.lower()
+                    for tag in chunk_tags:
+                        if isinstance(tag, str):
+                            # Check if any word from query appears in tag
+                            tag_words = tag.split()
+                            for word in tag_words:
+                                if len(word) > 2 and word in query_lower:
+                                    boost += keyword_weight * 0.5
+                                    break
+                
                 # Apply boost to score
                 original_score = result["score"]
                 result["score"] = (original_score * vector_weight) + boost

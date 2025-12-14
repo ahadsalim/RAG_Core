@@ -453,19 +453,32 @@ class QdrantService:
                         boost += keyword_weight * 0.6
                 
                 # Boost if query keywords match tags
+                # تگ‌ها می‌توانند chunks مرتبط را که embedding ضعیف‌تری دارند بالا بیاورند
+                # اما نباید جستجوی برداری را بی‌معنا کنند
                 chunk_tags = metadata.get("tags", [])
                 if chunk_tags and isinstance(chunk_tags, list):
-                    query_lower = query_text.lower()
+                    query_words = set(query_text.split())
+                    tag_match_count = 0
                     for tag in chunk_tags:
                         if isinstance(tag, str):
-                            # Check if any word from query appears in tag
-                            tag_words = tag.split()
-                            for word in tag_words:
-                                if len(word) > 2 and word in query_lower:
-                                    boost += keyword_weight * 0.5
-                                    break
+                            tag_words = set(tag.split())
+                            # تعداد کلمات مشترک بین query و tag
+                            common_words = query_words & tag_words
+                            # فقط کلمات با طول > 2 حساب شوند
+                            meaningful_matches = [w for w in common_words if len(w) > 2]
+                            tag_match_count += len(meaningful_matches)
+                    
+                    if tag_match_count > 0:
+                        # حداکثر boost از تگ: 0.15 (برای جلوگیری از غلبه بر vector score)
+                        # هر match: 0.05 boost، حداکثر 3 match
+                        tag_boost = min(tag_match_count * 0.05, 0.15)
+                        boost += tag_boost
                 
                 # Apply boost to score
+                # فرمول نهایی: score = (original * vector_weight) + boost
+                # با vector_weight=0.7، یک chunk با score=0.84 می‌شود 0.588
+                # اگر tag_boost=0.15 داشته باشد، می‌شود 0.738
+                # این باعث می‌شود chunk با score=0.88 (بدون تگ) = 0.616 هنوز بالاتر باشد
                 original_score = result["score"]
                 result["score"] = (original_score * vector_weight) + boost
                 result["metadata"]["_hybrid_boost"] = boost

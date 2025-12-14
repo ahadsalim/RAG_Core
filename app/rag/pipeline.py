@@ -715,7 +715,10 @@ class RAGPipeline:
                 user_message_parts.append("\n" + "="*50 + "\n")
             
             user_message_parts.append(f"""اطلاعات مرجع از پایگاه داده:
-{context}""")
+{context}
+
+سوال کاربر:
+{query}""")
             
             user_message = "\n".join(user_message_parts)
         else:
@@ -726,7 +729,10 @@ class RAGPipeline:
                 user_message_parts.append("\n" + "="*50 + "\n")
             
             user_message_parts.append(f"""Reference information from database:
-{context}""")
+{context}
+
+User question:
+{query}""")
             
             user_message = "\n".join(user_message_parts)
         

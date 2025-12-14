@@ -64,8 +64,8 @@ LLM2_MODEL = os.getenv("LLM2_MODEL", "gpt-4o")  # برای تولید سوالا
 # ============================================================================
 ANALYSIS_MODEL = "gpt-5.2"  # مدل پیشرفته برای تحلیل نهایی نتایج
 
-# Output paths
-OUTPUT_DIR = Path(__file__).parent
+# Output paths - use /tmp for container compatibility, then copy to test folder
+OUTPUT_DIR = Path("/tmp")
 REPORT_FILE = OUTPUT_DIR / "test_comprehensive_report.md"
 RESULTS_JSON = OUTPUT_DIR / "test_results.json"
 

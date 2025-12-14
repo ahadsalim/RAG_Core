@@ -713,12 +713,12 @@ class RAGPipeline:
             if additional_context:
                 user_message_parts.append(additional_context)
                 user_message_parts.append("\n" + "="*50 + "\n")
+            else:
+                # اگر additional_context نیست، سوال کاربر را مستقیم اضافه کن
+                user_message_parts.append(f"[سوال فعلی]\n{query}\n")
             
             user_message_parts.append(f"""اطلاعات مرجع از پایگاه داده:
-{context}
-
-سوال کاربر:
-{query}""")
+{context}""")
             
             user_message = "\n".join(user_message_parts)
         else:
@@ -727,12 +727,12 @@ class RAGPipeline:
             if additional_context:
                 user_message_parts.append(additional_context)
                 user_message_parts.append("\n" + "="*50 + "\n")
+            else:
+                # If no additional_context, add user query directly
+                user_message_parts.append(f"[Current Question]\n{query}\n")
             
             user_message_parts.append(f"""Reference information from database:
-{context}
-
-User question:
-{query}""")
+{context}""")
             
             user_message = "\n".join(user_message_parts)
         

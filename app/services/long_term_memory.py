@@ -61,41 +61,15 @@ class LongTermMemoryService:
                 "category": str
             }
         """
-        system_prompt = """تو یک ماژول تشخیص حافظه هستی.
+        from app.config.prompts import MemoryPrompts
+        
+        system_prompt = MemoryPrompts.get_memory_extraction_prompt()
 
-ورودی: یک پیام از کاربر، پاسخ دستیار، و زمینه مکالمه.
-
-وظیفه:
-1. تشخیص بده که آیا اطلاعاتی وجود دارد که ارزش ذخیره بلندمدت دارد.
-
-فقط این موارد را ذخیره کن:
-- اطلاعات شخصی پایدار (سن، شغل، سطح دانش، شخصیت)
-- ترجیحات بلندمدت (علاقه مستمر به موضوع/محصول)
-- اهداف یا پروژه‌های جاری
-- زمینه کاری/تحصیلی
-- سبک یادگیری
-
-هرگز ذخیره نکن:
-- سوالات موقت و گذرا
-- محتوای فنی/حقوقی که فقط پرسیده شده
-- پاسخ‌های RAG
-- اطلاعات مربوط به همان سوال
-
-خروجی فقط JSON:
-{
-    "should_write_memory": true/false,
-    "memory_to_write": "یک جمله کوتاه و دقیق",
-    "category": "personal_info|preference|goal|interest|context|behavior|other"
-}
-
-اگر موردی نیست:
-{"should_write_memory": false, "memory_to_write": "", "category": ""}"""
-
-        user_content = f"""پیام کاربر: {user_message}
-
-پاسخ دستیار: {assistant_response[:500]}...
-
-زمینه مکالمه: {conversation_context or 'ندارد'}"""
+        user_content = MemoryPrompts.format_memory_extraction_user(
+            user_message=user_message,
+            assistant_response=assistant_response,
+            conversation_context=conversation_context
+        )
 
         try:
             messages = [

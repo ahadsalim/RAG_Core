@@ -224,18 +224,9 @@ class ConversationMemory:
     async def _summarize_conversation(self, conversation_text: str) -> Optional[str]:
         """خلاصه‌سازی مکالمه با LLM"""
         try:
-            system_prompt = """تو یک ماژول خلاصه‌سازی مکالمه هستی.
-
-وظیفه: از مکالمات قدیمی داده شده، یک خلاصه مفید بساز که شامل:
-1. موضوعات اصلی که بحث شد
-2. سوالات مهم کاربر و پاسخ‌های کلیدی
-3. نتیجه‌گیری‌ها و تصمیمات
-
-قوانین:
-- حداکثر 200 کلمه
-- فقط اطلاعات مرتبط با این چت را نگه دار
-- جزئیات فنی/حقوقی را خلاصه کن، نه کپی
-- فقط خلاصه را بنویس، بدون توضیح اضافی"""
+            from app.config.prompts import MemoryPrompts
+            
+            system_prompt = MemoryPrompts.get_conversation_summary_prompt()
 
             messages = [
                 Message(role="system", content=system_prompt),

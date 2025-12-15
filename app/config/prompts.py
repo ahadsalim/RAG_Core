@@ -428,6 +428,8 @@ class FileAnalysisPrompts:
 3. ارتباط محتوا با سوال کاربر را مشخص کن
 4. اگر جدول یا داده عددی وجود دارد، آن را تفسیر کن
 
+⚠️ محدودیت مهم: پاسخ تو حداکثر 3000 کاراکتر باشد تا در تاریخچه مکالمه جا شود.
+اگر فایل بزرگ است، فقط مهم‌ترین بخش‌ها را خلاصه کن و فهرست عناوین را بده.
 پاسخ را مختصر، دقیق و کاربردی بنویس."""
 
     # System prompt برای تحلیل فایل (انگلیسی)
@@ -440,6 +442,8 @@ For each file:
 3. Identify relevance to user's question
 4. Interpret tables or numerical data if present
 
+⚠️ Important limit: Keep your response under 3000 characters to fit in conversation history.
+For large files, summarize only the most important parts and list section titles.
 Keep the response concise, accurate and practical."""
 
     # Vision prompt برای تحلیل تصویر (فارسی)

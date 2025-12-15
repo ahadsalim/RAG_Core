@@ -142,6 +142,42 @@ class StorageService:
             logger.error(f"Failed to upload file to temp storage: {e}", filename=filename)
             raise
     
+    def get_presigned_url(self, object_key: str, bucket: Optional[str] = None, expiration_seconds: int = 3600) -> str:
+        """
+        Generate a presigned URL for accessing a file.
+        This URL can be used by external services (like OpenAI) to access the file.
+        
+        Args:
+            object_key: S3 object key
+            bucket: Bucket name (defaults to temp_bucket)
+            expiration_seconds: URL expiration time in seconds (default 1 hour)
+            
+        Returns:
+            Presigned URL string
+        """
+        try:
+            bucket_name = bucket or self.temp_bucket
+            
+            url = self.s3_client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': bucket_name,
+                    'Key': object_key
+                },
+                ExpiresIn=expiration_seconds
+            )
+            
+            logger.info(
+                "Generated presigned URL",
+                object_key=object_key,
+                expiration_seconds=expiration_seconds
+            )
+            return url
+            
+        except Exception as e:
+            logger.error(f"Failed to generate presigned URL: {e}", object_key=object_key)
+            raise
+    
     async def download_temp_file(self, object_key: str, bucket: Optional[str] = None) -> bytes:
         """
         Download a file from temporary storage.

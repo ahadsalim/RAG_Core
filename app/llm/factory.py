@@ -283,78 +283,7 @@ class LLMWithFallback:
         except Exception as e:
             logger.error(f"Fallback LLM web search failed: {e}")
             raise Exception(f"Fallback LLM web search failed: {e}")
-
-    async def generate_with_images(
-        self,
-        messages: List[Message],
-        images: List[Dict[str, Any]],
-        **kwargs
-    ) -> LLMResponse:
-        """
-        Generate response with images using Vision API with fallback
-        
-        Args:
-            messages: لیست پیام‌ها
-            images: لیست تصاویر با 'data' (bytes) و 'filename' (str)
-            
-        Returns:
-            LLMResponse از primary یا fallback
-        """
-        timeout = settings.llm_primary_timeout
-        
-        # اگر primary قبلاً down شده، مستقیم به fallback برو
-        if is_primary_llm_down():
-            logger.info("Primary LLM is marked as DOWN, using fallback directly for vision")
-            if self.fallback_llm:
-                return await self._call_fallback_with_images(messages, images, timeout, **kwargs)
-            else:
-                raise Exception("Primary LLM is down and no fallback configured")
-        
-        # تلاش با Primary
-        try:
-            logger.debug(f"Trying primary LLM (Vision): {self.primary_config.model}")
-            response = await asyncio.wait_for(
-                self.primary_llm.generate_with_images(messages, images, **kwargs),
-                timeout=timeout
-            )
-            logger.info("Primary LLM (Vision) responded successfully")
-            return response
-        except asyncio.TimeoutError:
-            logger.warning(f"Primary LLM vision timeout ({timeout}s)")
-            set_primary_llm_down(True)
-        except Exception as e:
-            logger.warning(f"Primary LLM vision failed: {e}")
-            set_primary_llm_down(True)
-        
-        # تلاش با Fallback
-        if self.fallback_llm:
-            return await self._call_fallback_with_images(messages, images, timeout, **kwargs)
-        else:
-            raise Exception("Primary LLM failed and no fallback configured")
-
-    async def _call_fallback_with_images(
-        self, 
-        messages: List[Message], 
-        images: List[Dict[str, Any]],
-        timeout: float,
-        **kwargs
-    ) -> LLMResponse:
-        """فراخوانی Fallback LLM با Vision"""
-        try:
-            logger.info(f"Trying fallback LLM (Vision): {self.fallback_config.model}")
-            response = await asyncio.wait_for(
-                self.fallback_llm.generate_with_images(messages, images, **kwargs),
-                timeout=timeout
-            )
-            logger.info("Fallback LLM (Vision) responded successfully")
-            return response
-        except asyncio.TimeoutError:
-            logger.error(f"Fallback LLM vision timeout ({timeout}s)")
-            raise Exception("Fallback LLM vision timed out")
-        except Exception as e:
-            logger.error(f"Fallback LLM vision failed: {e}")
-            raise Exception(f"Fallback LLM vision failed: {e}")
-
+    
 def create_llm1_light() -> LLMWithFallback:
     """
     ایجاد LLM1 (Light) برای سوالات ساده

@@ -404,7 +404,7 @@ class FileAnalysisService:
         language: str = "fa"
     ) -> str:
         """
-        تحلیل فایل‌های ضمیمه شده با LLM
+        تحلیل فایل‌های ضمیمه شده با LLM (متد قدیمی - فقط متن)
         
         Args:
             files_content: لیست فایل‌ها شامل:
@@ -418,45 +418,153 @@ class FileAnalysisService:
         Returns:
             تحلیل کامل فایل‌ها
         """
-        try:
-            # تهیه prompt برای تحلیل
-            analysis_prompt = self._build_analysis_prompt(
-                files_content,
-                user_query,
-                language
-            )
+        # استفاده از متد جدید با پشتیبانی از تصاویر
+        return await self.analyze_files_with_images(files_content, user_query, language)
+    
+    async def analyze_files_with_images(
+        self,
+        files_content: List[Dict[str, Any]],
+        user_query: str,
+        language: str = "fa"
+    ) -> str:
+        """
+        تحلیل فایل‌های ضمیمه شده با LLM (با پشتیبانی از تصاویر)
+        
+        این متد از Responses API با input_image برای تصاویر استفاده می‌کند.
+        
+        Args:
+            files_content: لیست فایل‌ها شامل:
+                - filename: نام فایل
+                - content: محتوای استخراج شده (متن) - برای فایل‌های متنی
+                - file_type: نوع فایل
+                - is_image: آیا تصویر است؟
+                - image_url: URL معتبر تصویر (presigned URL از MinIO)
+            user_query: سوال کاربر
+            language: زبان
             
-            # ارسال به LLM برای تحلیل
-            messages = [
-                Message(
-                    role="system",
-                    content=self._get_system_prompt(language)
-                ),
-                Message(
-                    role="user",
-                    content=analysis_prompt
-                )
+        Returns:
+            تحلیل کامل فایل‌ها
+        """
+        try:
+            # جداسازی تصاویر و فایل‌های متنی
+            images = [f for f in files_content if f.get('is_image') and f.get('image_url')]
+            text_files = [f for f in files_content if not f.get('is_image')]
+            
+            # ساخت محتوای پیام
+            content_parts = []
+            
+            # اضافه کردن prompt متنی
+            text_prompt = self._build_analysis_prompt_for_mixed(
+                text_files, images, user_query, language
+            )
+            content_parts.append({
+                "type": "input_text",
+                "text": text_prompt
+            })
+            
+            # اضافه کردن تصاویر با input_image
+            for img in images:
+                content_parts.append({
+                    "type": "input_image",
+                    "image_url": img['image_url']
+                })
+            
+            # ساخت input برای Responses API
+            input_content = [
+                {
+                    "role": "user",
+                    "content": content_parts
+                }
             ]
             
-            # استفاده از Responses API برای تحلیل فایل
-            response = await self.llm.generate_responses_api(
-                messages, 
-                reasoning_effort="medium"
+            logger.info(
+                "Sending files to LLM with images",
+                text_files_count=len(text_files),
+                images_count=len(images)
             )
-            analysis = response.content  # Extract content from LLMResponse
+            
+            # ارسال به LLM با Responses API
+            response = await self.llm.generate_responses_api(
+                messages=[],  # خالی چون از input_content استفاده می‌کنیم
+                reasoning_effort="medium",
+                input_content=input_content,
+                max_tokens=4096
+            )
+            
+            analysis = response.content
             
             logger.info(
-                "Files analyzed (Responses API)",
+                "Files analyzed with images (Responses API)",
                 file_count=len(files_content),
+                images_count=len(images),
                 analysis_length=len(analysis)
             )
             
             return analysis.strip()
             
         except Exception as e:
-            logger.error(f"Failed to analyze files: {e}")
+            logger.error(f"Failed to analyze files with images: {e}")
             # در صورت خطا، فقط محتوای خام را برگردان
             return self._fallback_analysis(files_content)
+    
+    def _build_analysis_prompt_for_mixed(
+        self,
+        text_files: List[Dict[str, Any]],
+        images: List[Dict[str, Any]],
+        user_query: str,
+        language: str
+    ) -> str:
+        """ساخت prompt برای تحلیل فایل‌های ترکیبی (متن + تصویر)"""
+        parts = []
+        
+        if language == "fa":
+            parts.append(f"سوال کاربر: {user_query}\n")
+            
+            if text_files:
+                parts.append(f"\n--- فایل‌های متنی ({len(text_files)} فایل) ---")
+                for i, file_info in enumerate(text_files, 1):
+                    parts.append(f"\nفایل {i}: {file_info['filename']}")
+                    content = file_info.get('content', '')
+                    if content:
+                        max_length = 3000
+                        if len(content) > max_length:
+                            content = content[:max_length] + "\n... (ادامه دارد)"
+                        parts.append(f"محتوا:\n{content}")
+                    else:
+                        parts.append("(محتوای متنی استخراج نشد)")
+            
+            if images:
+                parts.append(f"\n--- تصاویر ({len(images)} تصویر) ---")
+                for i, img in enumerate(images, 1):
+                    parts.append(f"تصویر {i}: {img['filename']}")
+                parts.append("\nلطفاً تصاویر بالا را تحلیل کن.")
+            
+            parts.append("\n\nلطفاً این فایل‌ها را تحلیل کن و اطلاعات مهم را استخراج کن.")
+        else:
+            parts.append(f"User's question: {user_query}\n")
+            
+            if text_files:
+                parts.append(f"\n--- Text Files ({len(text_files)} files) ---")
+                for i, file_info in enumerate(text_files, 1):
+                    parts.append(f"\nFile {i}: {file_info['filename']}")
+                    content = file_info.get('content', '')
+                    if content:
+                        max_length = 3000
+                        if len(content) > max_length:
+                            content = content[:max_length] + "\n... (continued)"
+                        parts.append(f"Content:\n{content}")
+                    else:
+                        parts.append("(No text content extracted)")
+            
+            if images:
+                parts.append(f"\n--- Images ({len(images)} images) ---")
+                for i, img in enumerate(images, 1):
+                    parts.append(f"Image {i}: {img['filename']}")
+                parts.append("\nPlease analyze the images above.")
+            
+            parts.append("\n\nPlease analyze these files and extract important information.")
+        
+        return "\n".join(parts)
     
     async def analyze_image_with_vision(
         self,

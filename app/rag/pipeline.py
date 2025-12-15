@@ -41,8 +41,6 @@ class RAGQuery:
     # فیلتر زمانی برای قوانین
     temporal_context: Optional[str] = None  # "current" یا "past" یا None
     target_date: Optional[str] = None  # تاریخ هدف برای گذشته (YYYY-MM-DD)
-    # تصاویر برای ارسال به LLM با Vision API
-    images: Optional[List[Dict[str, Any]]] = None  # لیست {'data': bytes, 'filename': str}
     
     def __post_init__(self):
         """Set default values from settings if not provided."""
@@ -92,7 +90,13 @@ class RAGPipeline:
         else:
             logger.info("RAG Pipeline initialized with LLM2 (Pro) (no reranker)")
         
-    async def process(self, query: RAGQuery, additional_context: str = None, skip_classification: bool = False) -> RAGResponse:
+    async def process(
+        self, 
+        query: RAGQuery, 
+        additional_context: str = None, 
+        skip_classification: bool = False,
+        image_urls: List[str] = None
+    ) -> RAGResponse:
         """
         Process a query through the RAG pipeline.
         
@@ -100,6 +104,7 @@ class RAGPipeline:
             query: RAG query request
             additional_context: Additional context for LLM (memory, file analysis, etc.)
             skip_classification: Skip classification if already done in query endpoint
+            image_urls: List of presigned URLs for images to send to LLM
             
         Returns:
             RAG response with answer and sources
@@ -234,7 +239,7 @@ class RAGPipeline:
                 query.user_preferences,
                 additional_context=additional_context,
                 enable_web_search=query.enable_web_search,
-                images=query.images
+                image_urls=image_urls
             )
             
             # Step 6: Extract sources (filter based on LLM's decision)
@@ -675,7 +680,7 @@ class RAGPipeline:
         user_preferences: Optional[Dict[str, Any]] = None,
         additional_context: str = None,
         enable_web_search: bool = False,
-        images: Optional[List[Dict[str, Any]]] = None
+        image_urls: List[str] = None
     ) -> Tuple[str, int, int, int]:
         """
         Generate answer using LLM with retrieved context.
@@ -688,7 +693,7 @@ class RAGPipeline:
             user_preferences: Optional user preferences for response customization
             additional_context: Additional context (memory, file analysis, etc.)
             enable_web_search: Enable web search to supplement RAG sources
-            images: Optional list of images for Vision API
+            image_urls: List of presigned URLs for images to send to LLM
             
         Returns:
             Tuple of (answer, total_tokens, input_tokens, output_tokens)
@@ -753,10 +758,26 @@ class RAGPipeline:
             Message(role="user", content=user_message)
         ]
         
-        # Generate response - با تصویر، web search یا معمولی
-        if images:
-            logger.info("Generating RAG answer with Vision API", image_count=len(images))
-            response = await self.llm.generate_with_images(messages, images)
+        # Generate response - با یا بدون web search و تصاویر
+        if image_urls:
+            # اگر تصویر داریم، از input_content با input_image استفاده کن
+            content_parts = [
+                {"type": "input_text", "text": f"{system_prompt}\n\n---\n\n{user_message}"}
+            ]
+            for img_url in image_urls:
+                content_parts.append({
+                    "type": "input_image",
+                    "image_url": img_url
+                })
+            
+            input_content = [{"role": "user", "content": content_parts}]
+            
+            logger.info(f"Generating RAG answer with {len(image_urls)} images")
+            response = await self.llm.generate_responses_api(
+                messages=[],
+                reasoning_effort="medium",
+                input_content=input_content
+            )
         elif enable_web_search:
             logger.info("Generating RAG answer with web search enabled")
             response = await self.llm.generate_with_web_search(messages)

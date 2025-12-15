@@ -381,9 +381,13 @@ async def process_query_enhanced(
             
             # ========== مسیر 3: general - سوال عمومی غیر کسب‌وکار ==========
             elif classification.category == "general":
+                # استخراج تصاویر از files_content
+                image_urls = [f.get('image_url') for f in files_content if f.get('is_image') and f.get('image_url')]
+                
                 logger.info(
                     "Handling general: using LLM1 (Light) without RAG",
-                    needs_web_search=classification.needs_web_search
+                    needs_web_search=classification.needs_web_search,
+                    has_images=len(image_urls) > 0
                 )
                 
                 # استفاده از LLM1 (Light) برای سوالات ساده
@@ -416,7 +420,7 @@ async def process_query_enhanced(
                     ])
                     user_message_parts.append(f"[مکالمات اخیر]\n{memory_text}\n")
                 
-                # 3. تحلیل فایل
+                # 3. تحلیل فایل (متن فایل‌های متنی)
                 if file_analysis:
                     user_message_parts.append(f"[تحلیل فایل‌های ضمیمه]\n{file_analysis}\n")
                 
@@ -425,37 +429,47 @@ async def process_query_enhanced(
                 
                 user_message = "\n".join(user_message_parts)
                 
-                messages = [
-                    Message(role="system", content=system_message),
-                    Message(role="user", content=user_message)
-                ]
-                
-                # استخراج تصاویر از files_content
-                images_for_llm = []
-                if files_content:
-                    for fc in files_content:
-                        if fc.get('is_image') and fc.get('image_data'):
-                            images_for_llm.append({
-                                'data': fc['image_data'],
-                                'filename': fc['filename']
-                            })
-                
-                # انتخاب روش پاسخ‌دهی
-                if images_for_llm:
-                    # اگر تصویر داریم، از Vision API استفاده کن
-                    logger.info("Using Vision API for general query with images", image_count=len(images_for_llm))
-                    llm_response = await llm.generate_with_images(messages, images_for_llm)
-                    model_used = f"{settings.llm1_model} (vision)"
-                elif classification.needs_web_search:
-                    logger.info("Using web search for general query")
-                    llm_response = await llm.generate_with_web_search(messages)
-                    model_used = f"{settings.llm1_model} (web_search)"
-                else:
+                # اگر تصویر داریم، از input_content با input_image استفاده کن
+                if image_urls:
+                    # ساخت content با تصاویر برای Responses API
+                    content_parts = [
+                        {"type": "input_text", "text": f"{system_message}\n\n---\n\n{user_message}"}
+                    ]
+                    for img_url in image_urls:
+                        content_parts.append({
+                            "type": "input_image",
+                            "image_url": img_url
+                        })
+                    
+                    input_content = [{"role": "user", "content": content_parts}]
+                    
+                    logger.info(f"Sending {len(image_urls)} images to LLM")
+                    
                     llm_response = await llm.generate_responses_api(
-                        messages,
-                        reasoning_effort="low"
+                        messages=[],
+                        reasoning_effort="low",
+                        input_content=input_content
                     )
-                    model_used = settings.llm1_model
+                    model_used = f"{settings.llm1_model} (with_images)"
+                else:
+                    # بدون تصویر - روش معمولی
+                    messages = [
+                        Message(role="system", content=system_message),
+                        Message(role="user", content=user_message)
+                    ]
+                    
+                    # انتخاب روش پاسخ‌دهی بر اساس نیاز به web search
+                    if classification.needs_web_search:
+                        logger.info("Using web search for general query")
+                        llm_response = await llm.generate_with_web_search(messages)
+                        model_used = f"{settings.llm1_model} (web_search)"
+                    else:
+                        llm_response = await llm.generate_responses_api(
+                            messages,
+                            reasoning_effort="low"
+                        )
+                        model_used = settings.llm1_model
+                
                 response_text = llm_response.content
                 
                 # اضافه کردن اطلاعات دیباگ
@@ -571,16 +585,6 @@ async def process_query_enhanced(
             final_decision=web_search_enabled
         )
         
-        # استخراج تصاویر از files_content برای ارسال به LLM
-        images_for_rag = []
-        if files_content:
-            for fc in files_content:
-                if fc.get('is_image') and fc.get('image_data'):
-                    images_for_rag.append({
-                        'data': fc['image_data'],
-                        'filename': fc['filename']
-                    })
-        
         rag_query = RAGQuery(
             text=search_query,  # فقط سوال اصلی برای embedding
             user_id=str(user.id),
@@ -594,16 +598,18 @@ async def process_query_enhanced(
             enable_web_search=web_search_enabled,  # Web search بر اساس تصمیم classifier و ترجیح کاربر
             # فیلتر زمانی بر اساس تشخیص classifier
             temporal_context=classification.temporal_context if classification else None,
-            target_date=classification.target_date if classification else None,
-            # تصاویر برای Vision API
-            images=images_for_rag if images_for_rag else None
+            target_date=classification.target_date if classification else None
         )
+        
+        # استخراج تصاویر از files_content برای ارسال به RAG Pipeline
+        image_urls_for_rag = [f.get('image_url') for f in files_content if f.get('is_image') and f.get('image_url')]
         
         pipeline = RAGPipeline()
         rag_response = await pipeline.process(
             rag_query,
             additional_context=llm_context,  # Context کامل برای LLM
-            skip_classification=True  # Classification قبلاً انجام شده
+            skip_classification=True,  # Classification قبلاً انجام شده
+            image_urls=image_urls_for_rag if image_urls_for_rag else None
         )
         
         # ========== مرحله 8: ذخیره پیام‌ها ==========

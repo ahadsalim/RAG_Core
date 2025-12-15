@@ -264,6 +264,12 @@ async def process_file_attachments(
     """
     پردازش و تحلیل فایل‌های ضمیمه
     
+    فرآیند:
+    1. تشخیص نوع فایل (تصویر یا متنی)
+    2. برای فایل‌های متنی: استخراج متن با کتابخانه‌های محلی
+    3. برای تصاویر: ساخت presigned URL از MinIO
+    4. ارسال به LLM با input_image برای تصاویر
+    
     Args:
         file_attachments: لیست فایل‌های ضمیمه
         query: سوال کاربر
@@ -280,38 +286,61 @@ async def process_file_attachments(
     file_analysis_service = get_file_analysis_service()
     
     files_content = []
+    image_urls = []  # لینک‌های معتبر تصاویر برای ارسال به LLM
     
     for attachment in file_attachments:
         try:
-            # دانلود از MinIO
-            file_data = await storage_service.download_temp_file(
-                attachment.minio_url
-            )
-            
-            # استخراج متن
-            processing_result = await file_processor.process_file(
-                file_data,
-                attachment.filename,
-                attachment.file_type
-            )
-            
             is_image = attachment.file_type.startswith('image/')
-            files_content.append({
-                'filename': attachment.filename,
-                'file_type': attachment.file_type,
-                'content': processing_result.get('text', ''),
-                'is_image': is_image,
-                'image_data': file_data if is_image else None  # ذخیره داده باینری تصویر برای ارسال به LLM
-            })
+            
+            if is_image:
+                # برای تصاویر: ساخت presigned URL
+                presigned_url = storage_service.get_presigned_url(
+                    attachment.minio_url,
+                    expiration_seconds=3600  # 1 ساعت
+                )
+                image_urls.append(presigned_url)
+                
+                files_content.append({
+                    'filename': attachment.filename,
+                    'file_type': attachment.file_type,
+                    'content': '',  # تصاویر محتوای متنی ندارند
+                    'is_image': True,
+                    'image_url': presigned_url  # URL معتبر برای LLM
+                })
+                
+                logger.info(
+                    "Image file prepared with presigned URL",
+                    filename=attachment.filename,
+                    url_generated=True
+                )
+            else:
+                # برای فایل‌های متنی: دانلود و استخراج متن
+                file_data = await storage_service.download_temp_file(
+                    attachment.minio_url
+                )
+                
+                processing_result = await file_processor.process_file(
+                    file_data,
+                    attachment.filename,
+                    attachment.file_type
+                )
+                
+                files_content.append({
+                    'filename': attachment.filename,
+                    'file_type': attachment.file_type,
+                    'content': processing_result.get('text', ''),
+                    'is_image': False,
+                    'image_url': None
+                })
             
         except Exception as e:
             logger.error(f"Failed to process file: {e}", filename=attachment.filename)
             continue
     
-    # تحلیل فایل‌ها با LLM
+    # تحلیل فایل‌ها با LLM (با پشتیبانی از تصاویر)
     file_analysis = None
     if files_content:
-        file_analysis = await file_analysis_service.analyze_files(
+        file_analysis = await file_analysis_service.analyze_files_with_images(
             files_content,
             query,
             language
@@ -319,6 +348,7 @@ async def process_file_attachments(
         logger.info(
             "Files analyzed with LLM",
             file_count=len(files_content),
+            image_count=len(image_urls),
             analysis_length=len(file_analysis) if file_analysis else 0
         )
     

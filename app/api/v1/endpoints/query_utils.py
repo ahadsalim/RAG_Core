@@ -359,6 +359,50 @@ async def process_file_attachments(
 # Message Management
 # ============================================================================
 
+def build_user_message_content(
+    query: str,
+    file_attachments: Optional[List[Any]] = None,
+    file_analysis: Optional[str] = None,
+    max_file_content_length: int = 4000
+) -> str:
+    """
+    ساخت محتوای پیام کاربر شامل سوال، نام فایل‌ها و محتوای فایل‌ها
+    
+    این تابع برای ذخیره در تاریخچه مکالمه استفاده می‌شود تا در پیام‌های بعدی
+    مدل به محتوای فایل‌های قبلی دسترسی داشته باشد.
+    
+    Args:
+        query: سوال کاربر
+        file_attachments: فایل‌های ضمیمه
+        file_analysis: تحلیل محتوای فایل‌ها
+        max_file_content_length: حداکثر طول محتوای فایل
+        
+    Returns:
+        محتوای کامل پیام کاربر
+    """
+    content = query
+    
+    # اضافه کردن نام فایل‌ها
+    if file_attachments:
+        file_names = []
+        for f in file_attachments:
+            if hasattr(f, 'filename'):
+                file_names.append(f.filename)
+            elif isinstance(f, dict) and 'filename' in f:
+                file_names.append(f['filename'])
+        if file_names:
+            content += f"\n[فایل‌های ضمیمه: {', '.join(file_names)}]"
+    
+    # اضافه کردن محتوای فایل (مهم برای تاریخچه مکالمه)
+    if file_analysis:
+        truncated = file_analysis[:max_file_content_length]
+        if len(file_analysis) > max_file_content_length:
+            truncated += "\n... (ادامه محتوا)"
+        content += f"\n\n[محتوای فایل‌های ضمیمه]\n{truncated}"
+    
+    return content
+
+
 async def save_conversation_messages(
     db: AsyncSession,
     conversation: Conversation,
@@ -366,6 +410,7 @@ async def save_conversation_messages(
     user_query: str,
     assistant_response: str,
     file_attachments: Optional[List[Any]] = None,
+    file_analysis: Optional[str] = None,
     sources: Optional[List[str]] = None,
     tokens_used: int = 0,
     processing_time_ms: Optional[int] = None,
@@ -382,6 +427,7 @@ async def save_conversation_messages(
         user_query: سوال کاربر
         assistant_response: پاسخ دستیار
         file_attachments: فایل‌های ضمیمه
+        file_analysis: تحلیل محتوای فایل‌ها (برای ذخیره در تاریخچه)
         sources: منابع
         tokens_used: توکن‌های مصرفی
         processing_time_ms: زمان پردازش
@@ -398,6 +444,15 @@ async def save_conversation_messages(
             [f.filename for f in file_attachments]
         ) + "]"
         user_message_content += file_info
+    
+    # اضافه کردن محتوای فایل به پیام کاربر (برای دسترسی در پیام‌های بعدی)
+    if file_analysis:
+        # محدود کردن طول برای جلوگیری از پیام‌های خیلی بزرگ
+        max_file_content_length = 4000
+        truncated_analysis = file_analysis[:max_file_content_length]
+        if len(file_analysis) > max_file_content_length:
+            truncated_analysis += "\n... (ادامه محتوا)"
+        user_message_content += f"\n\n[محتوای فایل‌های ضمیمه]\n{truncated_analysis}"
     
     # پیام کاربر
     user_message = DBMessage(

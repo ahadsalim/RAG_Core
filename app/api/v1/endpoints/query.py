@@ -27,6 +27,7 @@ from app.api.v1.endpoints.query_utils import (
     get_or_create_conversation,
     get_conversation_context,
     build_llm_context,
+    build_user_message_content,
     process_file_attachments,
     save_conversation_messages,
     classify_query_with_context,
@@ -234,12 +235,15 @@ async def process_query_enhanced(
                     confidence=classification.confidence
                 )
                 
-                # ذخیره در دیتابیس
+                # ذخیره در دیتابیس (با محتوای فایل برای تاریخچه)
+                user_msg_content = build_user_message_content(
+                    request.query, request.file_attachments, file_analysis
+                )
                 user_msg = DBMessage(
                     id=uuid.uuid4(),
                     conversation_id=conversation.id,
                     role=MessageRole.USER,
-                    content=request.query,
+                    content=user_msg_content,
                     created_at=datetime.utcnow()
                 )
                 db.add(user_msg)
@@ -287,11 +291,12 @@ async def process_query_enhanced(
                 )
                 
                 # ذخیره در دیتابیس
+                user_msg_content = build_user_message_content(request.query)
                 user_msg = DBMessage(
                     id=uuid.uuid4(),
                     conversation_id=conversation.id,
                     role=MessageRole.USER,
-                    content=request.query,
+                    content=user_msg_content,
                     created_at=datetime.utcnow()
                 )
                 db.add(user_msg)
@@ -343,12 +348,15 @@ async def process_query_enhanced(
                     confidence=classification.confidence
                 )
                 
-                # ذخیره در دیتابیس
+                # ذخیره در دیتابیس (با محتوای فایل برای تاریخچه)
+                user_msg_content = build_user_message_content(
+                    request.query, request.file_attachments, file_analysis
+                )
                 user_msg = DBMessage(
                     id=uuid.uuid4(),
                     conversation_id=conversation.id,
                     role=MessageRole.USER,
-                    content=f"{request.query}\n[فایل‌های ضمیمه: {', '.join([f.filename for f in request.file_attachments])}]" if request.file_attachments else request.query,
+                    content=user_msg_content,
                     created_at=datetime.utcnow()
                 )
                 db.add(user_msg)
@@ -482,12 +490,15 @@ async def process_query_enhanced(
                     confidence=classification.confidence
                 )
                 
-                # ذخیره در دیتابیس
+                # ذخیره در دیتابیس (با محتوای فایل برای تاریخچه)
+                user_msg_content = build_user_message_content(
+                    request.query, request.file_attachments, file_analysis
+                )
                 user_msg = DBMessage(
                     id=uuid.uuid4(),
                     conversation_id=conversation.id,
                     role=MessageRole.USER,
-                    content=request.query,
+                    content=user_msg_content,
                     created_at=datetime.utcnow()
                 )
                 db.add(user_msg)
@@ -613,13 +624,10 @@ async def process_query_enhanced(
         )
         
         # ========== مرحله 8: ذخیره پیام‌ها ==========
-        # پیام کاربر
-        user_message_content = request.query
-        if request.file_attachments:
-            file_info = "\n[فایل‌های ضمیمه: " + ", ".join(
-                [f.filename for f in request.file_attachments]
-            ) + "]"
-            user_message_content += file_info
+        # پیام کاربر (با محتوای فایل برای تاریخچه)
+        user_message_content = build_user_message_content(
+            request.query, request.file_attachments, file_analysis
+        )
         
         user_message = DBMessage(
             id=uuid.uuid4(),

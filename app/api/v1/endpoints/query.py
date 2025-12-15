@@ -430,8 +430,23 @@ async def process_query_enhanced(
                     Message(role="user", content=user_message)
                 ]
                 
-                # انتخاب روش پاسخ‌دهی بر اساس نیاز به web search
-                if classification.needs_web_search:
+                # استخراج تصاویر از files_content
+                images_for_llm = []
+                if files_content:
+                    for fc in files_content:
+                        if fc.get('is_image') and fc.get('image_data'):
+                            images_for_llm.append({
+                                'data': fc['image_data'],
+                                'filename': fc['filename']
+                            })
+                
+                # انتخاب روش پاسخ‌دهی
+                if images_for_llm:
+                    # اگر تصویر داریم، از Vision API استفاده کن
+                    logger.info("Using Vision API for general query with images", image_count=len(images_for_llm))
+                    llm_response = await llm.generate_with_images(messages, images_for_llm)
+                    model_used = f"{settings.llm1_model} (vision)"
+                elif classification.needs_web_search:
                     logger.info("Using web search for general query")
                     llm_response = await llm.generate_with_web_search(messages)
                     model_used = f"{settings.llm1_model} (web_search)"
@@ -556,6 +571,16 @@ async def process_query_enhanced(
             final_decision=web_search_enabled
         )
         
+        # استخراج تصاویر از files_content برای ارسال به LLM
+        images_for_rag = []
+        if files_content:
+            for fc in files_content:
+                if fc.get('is_image') and fc.get('image_data'):
+                    images_for_rag.append({
+                        'data': fc['image_data'],
+                        'filename': fc['filename']
+                    })
+        
         rag_query = RAGQuery(
             text=search_query,  # فقط سوال اصلی برای embedding
             user_id=str(user.id),
@@ -569,7 +594,9 @@ async def process_query_enhanced(
             enable_web_search=web_search_enabled,  # Web search بر اساس تصمیم classifier و ترجیح کاربر
             # فیلتر زمانی بر اساس تشخیص classifier
             temporal_context=classification.temporal_context if classification else None,
-            target_date=classification.target_date if classification else None
+            target_date=classification.target_date if classification else None,
+            # تصاویر برای Vision API
+            images=images_for_rag if images_for_rag else None
         )
         
         pipeline = RAGPipeline()

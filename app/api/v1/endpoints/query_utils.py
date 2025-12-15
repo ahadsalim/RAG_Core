@@ -295,11 +295,13 @@ async def process_file_attachments(
                 attachment.file_type
             )
             
+            is_image = attachment.file_type.startswith('image/')
             files_content.append({
                 'filename': attachment.filename,
                 'file_type': attachment.file_type,
                 'content': processing_result.get('text', ''),
-                'is_image': attachment.file_type.startswith('image/')
+                'is_image': is_image,
+                'image_data': file_data if is_image else None  # ذخیره داده باینری تصویر برای ارسال به LLM
             })
             
         except Exception as e:

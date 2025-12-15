@@ -41,6 +41,8 @@ class RAGQuery:
     # فیلتر زمانی برای قوانین
     temporal_context: Optional[str] = None  # "current" یا "past" یا None
     target_date: Optional[str] = None  # تاریخ هدف برای گذشته (YYYY-MM-DD)
+    # تصاویر برای ارسال به LLM با Vision API
+    images: Optional[List[Dict[str, Any]]] = None  # لیست {'data': bytes, 'filename': str}
     
     def __post_init__(self):
         """Set default values from settings if not provided."""
@@ -231,7 +233,8 @@ class RAGPipeline:
                 query.conversation_id,
                 query.user_preferences,
                 additional_context=additional_context,
-                enable_web_search=query.enable_web_search
+                enable_web_search=query.enable_web_search,
+                images=query.images
             )
             
             # Step 6: Extract sources (filter based on LLM's decision)
@@ -671,7 +674,8 @@ class RAGPipeline:
         conversation_id: Optional[str],
         user_preferences: Optional[Dict[str, Any]] = None,
         additional_context: str = None,
-        enable_web_search: bool = False
+        enable_web_search: bool = False,
+        images: Optional[List[Dict[str, Any]]] = None
     ) -> Tuple[str, int, int, int]:
         """
         Generate answer using LLM with retrieved context.
@@ -684,6 +688,7 @@ class RAGPipeline:
             user_preferences: Optional user preferences for response customization
             additional_context: Additional context (memory, file analysis, etc.)
             enable_web_search: Enable web search to supplement RAG sources
+            images: Optional list of images for Vision API
             
         Returns:
             Tuple of (answer, total_tokens, input_tokens, output_tokens)
@@ -748,8 +753,11 @@ class RAGPipeline:
             Message(role="user", content=user_message)
         ]
         
-        # Generate response - با یا بدون web search
-        if enable_web_search:
+        # Generate response - با تصویر، web search یا معمولی
+        if images:
+            logger.info("Generating RAG answer with Vision API", image_count=len(images))
+            response = await self.llm.generate_with_images(messages, images)
+        elif enable_web_search:
             logger.info("Generating RAG answer with web search enabled")
             response = await self.llm.generate_with_web_search(messages)
         else:

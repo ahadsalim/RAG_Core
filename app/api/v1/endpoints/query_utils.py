@@ -413,6 +413,8 @@ async def save_conversation_messages(
     file_analysis: Optional[str] = None,
     sources: Optional[List[str]] = None,
     tokens_used: int = 0,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
     processing_time_ms: Optional[int] = None,
     retrieved_chunks: Optional[List[Dict[str, Any]]] = None,
     model_used: Optional[str] = None
@@ -427,9 +429,11 @@ async def save_conversation_messages(
         user_query: سوال کاربر
         assistant_response: پاسخ دستیار
         file_attachments: فایل‌های ضمیمه
-        file_analysis: تحلیل محتوای فایل‌ها (برای ذخیره در تاریخچه)
+        file_analysis: تحلیل محتوای فایل‌ها
         sources: منابع
-        tokens_used: توکن‌های مصرفی
+        tokens_used: توکن‌های کل
+        input_tokens: توکن‌های ورودی
+        output_tokens: توکن‌های خروجی
         processing_time_ms: زمان پردازش
         retrieved_chunks: چانک‌های بازیابی شده
         model_used: مدل استفاده شده
@@ -437,22 +441,8 @@ async def save_conversation_messages(
     Returns:
         Tuple[user_message, assistant_message]
     """
-    # محتوای پیام کاربر
-    user_message_content = user_query
-    if file_attachments:
-        file_info = "\n[فایل‌های ضمیمه: " + ", ".join(
-            [f.filename for f in file_attachments]
-        ) + "]"
-        user_message_content += file_info
-    
-    # اضافه کردن محتوای فایل به پیام کاربر (برای دسترسی در پیام‌های بعدی)
-    if file_analysis:
-        # محدود کردن طول برای جلوگیری از پیام‌های خیلی بزرگ
-        max_file_content_length = 4000
-        truncated_analysis = file_analysis[:max_file_content_length]
-        if len(file_analysis) > max_file_content_length:
-            truncated_analysis += "\n... (ادامه محتوا)"
-        user_message_content += f"\n\n[محتوای فایل‌های ضمیمه]\n{truncated_analysis}"
+    # محتوای پیام کاربر (استفاده از تابع مشترک)
+    user_message_content = build_user_message_content(user_query, file_attachments, file_analysis)
     
     # پیام کاربر
     user_message = DBMessage(
@@ -487,6 +477,8 @@ async def save_conversation_messages(
     # به‌روزرسانی user
     user.increment_query_count()
     user.total_tokens_used += tokens_used
+    user.total_input_tokens += input_tokens
+    user.total_output_tokens += output_tokens
     
     await db.commit()
     

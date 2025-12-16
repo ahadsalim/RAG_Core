@@ -233,36 +233,17 @@ async def process_query_enhanced(
                     answer=clarification_response,
                     category=f"{classification.category} (low_confidence)",
                     model="classifier",
-                    input_tokens=0,
-                    output_tokens=0,
                     confidence=classification.confidence
                 )
                 
-                # ذخیره در دیتابیس (با محتوای فایل برای تاریخچه)
-                user_msg_content = build_user_message_content(
-                    request.query, request.file_attachments, file_analysis
+                # ذخیره در دیتابیس
+                _, assistant_msg = await save_conversation_messages(
+                    db, conversation, user,
+                    user_query=request.query,
+                    assistant_response=clarification_response,
+                    file_attachments=request.file_attachments,
+                    file_analysis=file_analysis
                 )
-                user_msg = DBMessage(
-                    id=uuid.uuid4(),
-                    conversation_id=conversation.id,
-                    role=MessageRole.USER,
-                    content=user_msg_content,
-                    created_at=datetime.utcnow()
-                )
-                db.add(user_msg)
-                
-                assistant_msg = DBMessage(
-                    id=uuid.uuid4(),
-                    conversation_id=conversation.id,
-                    role=MessageRole.ASSISTANT,
-                    content=clarification_response,
-                    created_at=datetime.utcnow()
-                )
-                db.add(assistant_msg)
-                
-                conversation.message_count += 2
-                user.increment_query_count()
-                await db.commit()
                 
                 processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
                 
@@ -283,39 +264,18 @@ async def process_query_enhanced(
                 
                 response_text = classification.direct_response or "متن شما قابل فهم نیست. لطفاً سوال خود را به صورت واضح و کامل بپرسید."
                 
-                # اضافه کردن اطلاعات دیباگ
                 response_text = add_debug_info(
                     answer=response_text,
                     category=classification.category,
                     model="classifier",
-                    input_tokens=0,
-                    output_tokens=0,
                     confidence=classification.confidence
                 )
                 
-                # ذخیره در دیتابیس
-                user_msg_content = build_user_message_content(request.query)
-                user_msg = DBMessage(
-                    id=uuid.uuid4(),
-                    conversation_id=conversation.id,
-                    role=MessageRole.USER,
-                    content=user_msg_content,
-                    created_at=datetime.utcnow()
+                _, assistant_msg = await save_conversation_messages(
+                    db, conversation, user,
+                    user_query=request.query,
+                    assistant_response=response_text
                 )
-                db.add(user_msg)
-                
-                assistant_msg = DBMessage(
-                    id=uuid.uuid4(),
-                    conversation_id=conversation.id,
-                    role=MessageRole.ASSISTANT,
-                    content=response_text,
-                    created_at=datetime.utcnow()
-                )
-                db.add(assistant_msg)
-                
-                conversation.message_count += 2
-                user.increment_query_count()
-                await db.commit()
                 
                 processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
                 
@@ -337,45 +297,22 @@ async def process_query_enhanced(
                     has_meaningful_files=classification.has_meaningful_files
                 )
                 
-                # اگر فایل معنادار است، سوال هوشمندانه بپرس
-                # اگر فایل بی‌معنی است، درخواست توضیح کن
                 response_text = classification.direct_response or "لطفاً سوال خود را واضح‌تر بیان کنید."
                 
-                # اضافه کردن اطلاعات دیباگ
                 response_text = add_debug_info(
                     answer=response_text,
                     category=classification.category,
                     model="classifier",
-                    input_tokens=0,
-                    output_tokens=0,
                     confidence=classification.confidence
                 )
                 
-                # ذخیره در دیتابیس (با محتوای فایل برای تاریخچه)
-                user_msg_content = build_user_message_content(
-                    request.query, request.file_attachments, file_analysis
+                _, assistant_msg = await save_conversation_messages(
+                    db, conversation, user,
+                    user_query=request.query,
+                    assistant_response=response_text,
+                    file_attachments=request.file_attachments,
+                    file_analysis=file_analysis
                 )
-                user_msg = DBMessage(
-                    id=uuid.uuid4(),
-                    conversation_id=conversation.id,
-                    role=MessageRole.USER,
-                    content=user_msg_content,
-                    created_at=datetime.utcnow()
-                )
-                db.add(user_msg)
-                
-                assistant_msg = DBMessage(
-                    id=uuid.uuid4(),
-                    conversation_id=conversation.id,
-                    role=MessageRole.ASSISTANT,
-                    content=response_text,
-                    created_at=datetime.utcnow()
-                )
-                db.add(assistant_msg)
-                
-                conversation.message_count += 2
-                user.increment_query_count()
-                await db.commit()
                 
                 processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
                 
@@ -488,40 +425,21 @@ async def process_query_enhanced(
                     confidence=classification.confidence
                 )
                 
-                # ذخیره در دیتابیس (با محتوای فایل برای تاریخچه)
-                user_msg_content = build_user_message_content(
-                    request.query, request.file_attachments, file_analysis
-                )
-                user_msg = DBMessage(
-                    id=uuid.uuid4(),
-                    conversation_id=conversation.id,
-                    role=MessageRole.USER,
-                    content=user_msg_content,
-                    created_at=datetime.utcnow()
-                )
-                db.add(user_msg)
-                
-                assistant_msg = DBMessage(
-                    id=uuid.uuid4(),
-                    conversation_id=conversation.id,
-                    role=MessageRole.ASSISTANT,
-                    content=response_text,
-                    created_at=datetime.utcnow()
-                )
-                db.add(assistant_msg)
-                
-                conversation.message_count += 2
-                user.increment_query_count()
-                
-                # به‌روزرسانی توکن‌های کاربر
+                # استخراج توکن‌ها
                 input_tokens = llm_response.usage.get("prompt_tokens", 0) if llm_response.usage else 0
                 output_tokens = llm_response.usage.get("completion_tokens", 0) if llm_response.usage else 0
                 total_tokens = llm_response.usage.get("total_tokens", 0) if llm_response.usage else 0
-                user.total_tokens_used += total_tokens
-                user.total_input_tokens += input_tokens
-                user.total_output_tokens += output_tokens
                 
-                await db.commit()
+                _, assistant_msg = await save_conversation_messages(
+                    db, conversation, user,
+                    user_query=request.query,
+                    assistant_response=response_text,
+                    file_attachments=request.file_attachments,
+                    file_analysis=file_analysis,
+                    tokens_used=total_tokens,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens
+                )
                 
                 processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
                 
@@ -622,55 +540,25 @@ async def process_query_enhanced(
         )
         
         # ========== مرحله 8: ذخیره پیام‌ها ==========
-        # پیام کاربر (با محتوای فایل برای تاریخچه)
-        user_message_content = build_user_message_content(
-            request.query, request.file_attachments, file_analysis
-        )
+        retrieved_chunks_data = [
+            {"text": chunk.text, "score": chunk.score, "source": chunk.source, "metadata": chunk.metadata}
+            for chunk in rag_response.chunks
+        ]
         
-        user_message = DBMessage(
-            id=uuid.uuid4(),
-            conversation_id=conversation.id,
-            role=MessageRole.USER,
-            content=user_message_content,
-            created_at=datetime.utcnow()
-        )
-        db.add(user_message)
-        
-        # پیام دستیار
-        assistant_message = DBMessage(
-            id=uuid.uuid4(),
-            conversation_id=conversation.id,
-            role=MessageRole.ASSISTANT,
-            content=rag_response.answer,
-            tokens=rag_response.total_tokens,
-            processing_time_ms=rag_response.processing_time_ms,
-            retrieved_chunks=[
-                {
-                    "text": chunk.text,
-                    "score": chunk.score,
-                    "source": chunk.source,
-                    "metadata": chunk.metadata
-                }
-                for chunk in rag_response.chunks
-            ],
+        _, assistant_message = await save_conversation_messages(
+            db, conversation, user,
+            user_query=request.query,
+            assistant_response=rag_response.answer,
+            file_attachments=request.file_attachments,
+            file_analysis=file_analysis,
             sources=rag_response.sources,
-            model_used=rag_response.model_used,
-            created_at=datetime.utcnow()
+            tokens_used=rag_response.total_tokens,
+            input_tokens=rag_response.input_tokens,
+            output_tokens=rag_response.output_tokens,
+            processing_time_ms=rag_response.processing_time_ms,
+            retrieved_chunks=retrieved_chunks_data,
+            model_used=rag_response.model_used
         )
-        db.add(assistant_message)
-        
-        # به‌روزرسانی conversation
-        conversation.message_count += 2
-        conversation.total_tokens += rag_response.total_tokens
-        conversation.last_message_at = datetime.utcnow()
-        
-        # به‌روزرسانی user
-        user.increment_query_count()
-        user.total_tokens_used += rag_response.total_tokens
-        user.total_input_tokens += rag_response.input_tokens
-        user.total_output_tokens += rag_response.output_tokens
-        
-        await db.commit()
         
         # ========== مرحله 9: به‌روزرسانی حافظه‌ها (Background) ==========
         # 9.1: به‌روزرسانی حافظه چت (خلاصه پیام‌های قدیمی)

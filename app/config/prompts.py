@@ -342,6 +342,32 @@ class ClassificationPrompts:
         return 5
 
 
+class QueryEnhancementPrompts:
+    """پرامپت‌های بهینه‌سازی query برای جستجو"""
+    
+    ENHANCEMENT_PROMPT_FA = """شما یک متخصص جستجوی اسناد حقوقی هستید.
+وظیفه شما: سوال کاربر را برای جستجو در پایگاه داده بهینه کنید.
+
+کارها:
+1. اختصارات را باز کنید (ق.م → قانون مدنی، ق.ت.ا → قانون تأمین اجتماعی)
+2. اعداد فارسی را به انگلیسی تبدیل کنید (۱۲۳ → 123)
+3. اعداد کلامی را به عددی تبدیل کنید (ده → 10)
+4. املای اشتباه را تصحیح کنید
+
+مثال:
+- "ق.م ماده ۱۷۹" → "قانون مدنی ماده 179"
+- "ماده ده قانون چلمنگان" → "ماده 10 قانون چلمنگان"
+
+فقط query بهینه شده را برگردانید، بدون توضیح."""
+
+    @staticmethod
+    def get_enhancement_prompt(language: str = "fa") -> str:
+        """دریافت پرامپت بهینه‌سازی query"""
+        if language == "fa":
+            return QueryEnhancementPrompts.ENHANCEMENT_PROMPT_FA
+        return QueryEnhancementPrompts.ENHANCEMENT_PROMPT_FA  # فعلاً فقط فارسی
+
+
 class LLMConfig:
     """تنظیمات پیش‌فرض LLM"""
     

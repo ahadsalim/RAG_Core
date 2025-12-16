@@ -5,22 +5,30 @@ Complete Retrieval-Augmented Generation pipeline
 
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
+from datetime import datetime
 import asyncio
 import hashlib
-from datetime import datetime, timedelta
+import json
+import re
 
 import structlog
+import pytz
+import jdatetime
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.services.qdrant_service import QdrantService
-from app.services.embedding_service import get_embedding_service  # Unified embedding service
+from app.services.embedding_service import get_embedding_service
 from app.services.reranker_service import get_reranker
-from app.llm.openai_provider import OpenAIProvider
-from app.llm.base import Message, LLMConfig
+from app.llm.base import Message
 from app.llm.classifier import QueryClassifier
-from app.llm.factory import create_llm2_pro  # LLM2 (Pro) برای سوالات کسب‌وکار
+from app.llm.factory import create_llm2_pro
 from app.core.dependencies import get_redis_client
 from app.config.settings import settings
+from app.config.prompts import (
+    RAGPrompts,
+    SystemPrompts,
+    QueryEnhancementPrompts,
+)
 
 logger = structlog.get_logger()
 
@@ -309,32 +317,16 @@ class RAGPipeline:
             raise
     
     async def _generate_general_response(self, query_text: str) -> str:
-        """
-        تولید پاسخ برای سوالات عمومی (غیر تخصصی) با LLM1.
-        بدون استفاده از RAG - فقط دانش عمومی مدل.
-        
-        Args:
-            query_text: متن سوال کاربر
-            
-        Returns:
-            پاسخ تولید شده توسط LLM
-        """
-        from app.config.prompts import SystemPrompts
-        
+        """تولید پاسخ برای سوالات عمومی (غیر تخصصی) بدون RAG."""
         system_prompt = SystemPrompts.get_general_question_prompt()
-
         messages = [
             Message(role="system", content=system_prompt),
             Message(role="user", content=query_text)
         ]
         
-        # استفاده از Responses API
         response = await self.llm.generate_responses_api(
-            messages=messages,
-            reasoning_effort="low",
-            max_tokens=500
+            messages=messages, reasoning_effort="low", max_tokens=500
         )
-        
         return response.content
     
     async def _enhance_query(self, query: RAGQuery) -> str:
@@ -347,65 +339,32 @@ class RAGPipeline:
         Returns:
             Enhanced query text
         """
-        # استفاده از LLM برای بهبود query
+        if query.language != "fa":
+            return query.text
+        
         try:
-            if query.language == "fa":
-                system_prompt = """شما یک متخصص جستجوی اسناد حقوقی هستید.
-وظیفه شما: سوال کاربر را دریافت کرده و آن را برای جستجو در پایگاه داده بهینه کنید.
-
-کارهایی که باید انجام دهید:
-1. اختصارات قوانین را باز کنید (مثل ق.م → قانون مدنی، ق.ت.ا → قانون تأمین اجتماعی)
-2. اعداد فارسی را به انگلیسی تبدیل کنید (۱۲۳ → 123)
-3. اعداد کلامی را به عددی تبدیل کنید (ده → 10، بیست و پنج → 25)
-4. املای اشتباه را تصحیح کنید
-5. کلمات مترادف مهم اضافه کنید (در صورت نیاز)
-
-مهم: فقط query بهینه شده را برگردانید، بدون توضیح اضافی.
-
-مثال 1:
-ورودی: "ق.م ماده ۱۷۹"
-خروجی: "قانون مدنی ماده 179"
-
-مثال 2:
-ورودی: "ماده ده قانون چلمنگان"
-خروجی: "ماده 10 قانون چلمنگان"
-
-مثال 3:
-ورودی: "ق.ت.ا در مورد بازنشستگی"
-خروجی: "قانون تأمین اجتماعی بازنشستگی"
-
-فقط query بهینه شده را برگردانید."""
-
-                user_message = f"سوال کاربر: {query.text}"
-                
-                messages = [
-                    Message(role="system", content=system_prompt),
-                    Message(role="user", content=user_message)
-                ]
-                
-                # استفاده از Responses API برای enhancement
-                response = await self.llm.generate_responses_api(
-                    messages,
-                    reasoning_effort="low",
-                    max_tokens=200
-                )
-                
-                enhanced = response.content.strip()
-                
-                # اگر LLM چیز عجیبی برگرداند، از query اصلی استفاده کن
-                if not enhanced or len(enhanced) > len(query.text) * 3:
-                    enhanced = query.text
-                    logger.warning("LLM enhancement failed, using original query")
-                
-                logger.info(f"Query enhanced via LLM: '{query.text}' -> '{enhanced}'")
-                return enhanced
-                
-            else:
-                # برای زبان‌های دیگر فعلاً enhancement نداریم
+            system_prompt = QueryEnhancementPrompts.get_enhancement_prompt(query.language)
+            messages = [
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=f"سوال کاربر: {query.text}")
+            ]
+            
+            response = await self.llm.generate_responses_api(
+                messages, reasoning_effort="low", max_tokens=200
+            )
+            
+            enhanced = response.content.strip()
+            
+            # اگر LLM چیز عجیبی برگرداند، از query اصلی استفاده کن
+            if not enhanced or len(enhanced) > len(query.text) * 3:
+                logger.warning("LLM enhancement failed, using original query")
                 return query.text
-                
+            
+            logger.info(f"Query enhanced: '{query.text}' -> '{enhanced}'")
+            return enhanced
+            
         except Exception as e:
-            logger.warning(f"Query enhancement failed: {e}, using original query")
+            logger.warning(f"Query enhancement failed: {e}")
             return query.text
     
     @retry(
@@ -423,12 +382,9 @@ class RAGPipeline:
             Embedding vector
         """
         # Local embedding is synchronous, wrap it in async
-        import asyncio
         loop = asyncio.get_event_loop()
         embedding = await loop.run_in_executor(
-            None, 
-            self.embedder.encode_single,
-            text
+            None, self.embedder.encode_single, text
         )
         return embedding.tolist()
     
@@ -515,8 +471,6 @@ class RAGPipeline:
         """
         if not temporal_context:
             return chunks
-        
-        from datetime import datetime
         
         # تعیین تاریخ مرجع
         if temporal_context == "current":
@@ -796,135 +750,96 @@ class RAGPipeline:
     
     def _build_system_prompt(self, language: str, user_preferences: Optional[Dict[str, Any]] = None) -> str:
         """Build system prompt based on language and user preferences."""
-        from datetime import datetime
-        import pytz
-        import jdatetime
-        from app.config.prompts import RAGPrompts
-        
         # Get current date and time in Tehran timezone
         tehran_tz = pytz.timezone('Asia/Tehran')
         now = datetime.now(tehran_tz)
-        
-        # Convert to Jalali (Shamsi) calendar
         jalali_now = jdatetime.datetime.fromgregorian(datetime=now)
-        current_date_shamsi = jalali_now.strftime('%Y/%m/%d')  # 1404/09/10
-        current_time_fa = now.strftime('%H:%M')     # 16:24
+        
+        current_date_shamsi = jalali_now.strftime('%Y/%m/%d')
+        current_time = now.strftime('%H:%M')
         
         if language == "fa":
             base_prompt = RAGPrompts.get_rag_system_prompt_fa(
                 current_date_shamsi=current_date_shamsi,
-                current_time_fa=current_time_fa
+                current_time_fa=current_time
             )
         else:
-            # English prompt
-            current_date_gregorian = now.strftime('%Y-%m-%d')
-            current_time_en = now.strftime('%H:%M')
-            
             base_prompt = RAGPrompts.get_rag_system_prompt_en(
-                current_date_gregorian=current_date_gregorian,
+                current_date_gregorian=now.strftime('%Y-%m-%d'),
                 current_date_shamsi=current_date_shamsi,
-                current_time=current_time_en
+                current_time=current_time
             )
         
-        # Add user preferences to system prompt if provided
+        # Add user preferences if provided
         if user_preferences:
-            pref_additions = []
-            
-            if user_preferences.get("response_style"):
-                style = user_preferences["response_style"]
-                if language == "fa":
-                    pref_additions.append(f"- سبک پاسخ: {style}")
-                else:
-                    pref_additions.append(f"- Response style: {style}")
-            
-            if user_preferences.get("detail_level"):
-                level = user_preferences["detail_level"]
-                if language == "fa":
-                    pref_additions.append(f"- سطح جزئیات: {level}")
-                else:
-                    pref_additions.append(f"- Detail level: {level}")
-            
-            if pref_additions:
-                if language == "fa":
-                    base_prompt += "\n\nترجیحات کاربر:\n" + "\n".join(pref_additions)
-                else:
-                    base_prompt += "\n\nUser preferences:\n" + "\n".join(pref_additions)
+            base_prompt += self._format_preferences_for_prompt(user_preferences, language)
         
         return base_prompt
+    
+    def _format_preferences_for_prompt(self, prefs: Dict[str, Any], language: str) -> str:
+        """Format user preferences for system prompt."""
+        additions = []
+        
+        if prefs.get("response_style"):
+            key = "سبک پاسخ" if language == "fa" else "Response style"
+            additions.append(f"- {key}: {prefs['response_style']}")
+        
+        if prefs.get("detail_level"):
+            key = "سطح جزئیات" if language == "fa" else "Detail level"
+            additions.append(f"- {key}: {prefs['detail_level']}")
+        
+        if not additions:
+            return ""
+        
+        header = "\n\nترجیحات کاربر:\n" if language == "fa" else "\n\nUser preferences:\n"
+        return header + "\n".join(additions)
     
     def _format_user_preferences(self, preferences: Dict[str, Any], language: str) -> str:
         """Format user preferences into a readable instruction for LLM."""
         if not preferences:
             return ""
         
+        # Translation maps for Persian
+        STYLE_MAP_FA = {
+            "formal": "رسمی و تخصصی", "casual": "غیررسمی و ساده",
+            "academic": "آکادمیک و علمی", "simple": "ساده و قابل فهم"
+        }
+        LEVEL_MAP_FA = {
+            "brief": "خلاصه و مختصر", "moderate": "متوسط",
+            "comprehensive": "جامع و کامل", "detailed": "با جزئیات کامل"
+        }
+        FORMAT_MAP_FA = {
+            "bullet_points": "پاسخ را به صورت نکات کلیدی ارائه دهید",
+            "numbered_list": "پاسخ را به صورت لیست شماره‌دار ارائه دهید",
+            "paragraph": "پاسخ را به صورت پاراگراف‌های منسجم ارائه دهید"
+        }
+        
         instructions = []
+        is_fa = language == "fa"
         
-        if language == "fa":
-            if preferences.get("response_style"):
-                style_map = {
-                    "formal": "رسمی و تخصصی",
-                    "casual": "غیررسمی و ساده",
-                    "academic": "آکادمیک و علمی",
-                    "simple": "ساده و قابل فهم"
-                }
-                style = style_map.get(preferences["response_style"], preferences["response_style"])
-                instructions.append(f"سبک پاسخ: {style}")
-            
-            if preferences.get("detail_level"):
-                level_map = {
-                    "brief": "خلاصه و مختصر",
-                    "moderate": "متوسط",
-                    "comprehensive": "جامع و کامل",
-                    "detailed": "با جزئیات کامل"
-                }
-                level = level_map.get(preferences["detail_level"], preferences["detail_level"])
-                instructions.append(f"سطح جزئیات: {level}")
-            
-            if preferences.get("include_examples"):
-                if preferences["include_examples"]:
-                    instructions.append("لطفاً مثال‌های عملی ارائه دهید")
-            
-            if preferences.get("language_style"):
-                style_map = {
-                    "simple": "از زبان ساده استفاده کنید",
-                    "technical": "از اصطلاحات تخصصی استفاده کنید",
-                    "mixed": "ترکیبی از زبان ساده و تخصصی"
-                }
-                style = style_map.get(preferences["language_style"], preferences["language_style"])
-                instructions.append(style)
-            
-            if preferences.get("format"):
-                format_map = {
-                    "bullet_points": "پاسخ را به صورت نکات کلیدی ارائه دهید",
-                    "numbered_list": "پاسخ را به صورت لیست شماره‌دار ارائه دهید",
-                    "paragraph": "پاسخ را به صورت پاراگراف‌های منسجم ارائه دهید"
-                }
-                fmt = format_map.get(preferences["format"], preferences["format"])
-                instructions.append(fmt)
-            
-            if instructions:
-                return "راهنمای پاسخ:\n" + "\n".join(f"- {inst}" for inst in instructions)
+        if preferences.get("response_style"):
+            val = preferences["response_style"]
+            label = STYLE_MAP_FA.get(val, val) if is_fa else val
+            instructions.append(f"{'سبک پاسخ' if is_fa else 'Response style'}: {label}")
         
-        else:  # English
-            if preferences.get("response_style"):
-                instructions.append(f"Response style: {preferences['response_style']}")
-            
-            if preferences.get("detail_level"):
-                instructions.append(f"Detail level: {preferences['detail_level']}")
-            
-            if preferences.get("include_examples") and preferences["include_examples"]:
-                instructions.append("Please include practical examples")
-            
-            if preferences.get("language_style"):
-                instructions.append(f"Language style: {preferences['language_style']}")
-            
-            if preferences.get("format"):
-                instructions.append(f"Format: {preferences['format']}")
-            
-            if instructions:
-                return "Response guidelines:\n" + "\n".join(f"- {inst}" for inst in instructions)
+        if preferences.get("detail_level"):
+            val = preferences["detail_level"]
+            label = LEVEL_MAP_FA.get(val, val) if is_fa else val
+            instructions.append(f"{'سطح جزئیات' if is_fa else 'Detail level'}: {label}")
         
-        return ""
+        if preferences.get("include_examples"):
+            instructions.append("لطفاً مثال‌های عملی ارائه دهید" if is_fa else "Please include practical examples")
+        
+        if preferences.get("format"):
+            val = preferences["format"]
+            label = FORMAT_MAP_FA.get(val, val) if is_fa else val
+            instructions.append(label if is_fa else f"Format: {label}")
+        
+        if not instructions:
+            return ""
+        
+        header = "راهنمای پاسخ:\n" if is_fa else "Response guidelines:\n"
+        return header + "\n".join(f"- {inst}" for inst in instructions)
     
     def _extract_sources(self, chunks: List[RAGChunk]) -> List[str]:
         """Extract detailed sources from chunks with full context."""
@@ -1004,20 +919,7 @@ class RAGPipeline:
         return sources
     
     def _extract_used_sources(self, answer: str) -> Tuple[str, Optional[List[int]]]:
-        """
-        استخراج شماره منابع استفاده شده از پاسخ LLM.
-        
-        Args:
-            answer: پاسخ LLM که ممکن است شامل تگ [USED_SOURCES: ...] باشد
-            
-        Returns:
-            Tuple of (cleaned_answer, list_of_source_indices)
-            - اگر تگ پیدا نشد: (answer, None)
-            - اگر NONE بود: (cleaned_answer, [])
-            - در غیر این صورت: (cleaned_answer, [1, 3, 5, ...])
-        """
-        import re
-        
+        """استخراج شماره منابع استفاده شده از پاسخ LLM."""
         # الگوی جستجو برای تگ USED_SOURCES
         pattern = r'\[USED_SOURCES:\s*([^\]]+)\]'
         match = re.search(pattern, answer, re.IGNORECASE)
@@ -1074,7 +976,6 @@ class RAGPipeline:
             # Check Redis cache
             cached = await redis.get(cache_key)
             if cached:
-                import json
                 data = json.loads(cached)
                 
                 # Reconstruct response
@@ -1118,7 +1019,6 @@ class RAGPipeline:
             cache_key = self._generate_cache_key(query)
             
             # Prepare data for caching
-            import json
             cache_data = {
                 "answer": response.answer,
                 "chunks": [

@@ -17,6 +17,10 @@ from app.rag.pipeline import RAGPipeline, RAGQuery
 from app.models.user import UserProfile, Conversation, Message as DBMessage, MessageRole
 from app.core.security import get_current_user_id
 from app.config.settings import settings
+from app.config.prompts import SystemPrompts
+from app.llm.base import Message
+from app.llm.factory import get_llm_for_category
+from app.llm.classifier import QueryClassifier
 from app.services.conversation_memory import get_conversation_memory, ConversationMemory
 from app.services.long_term_memory import get_long_term_memory_service, LongTermMemoryService
 
@@ -193,7 +197,6 @@ async def process_query_enhanced(
         classification = None
         
         if settings.enable_query_classification:
-            from app.llm.classifier import QueryClassifier
             classifier = QueryClassifier()
             
             classification = await classifier.classify(
@@ -397,11 +400,6 @@ async def process_query_enhanced(
                     needs_web_search=classification.needs_web_search,
                     has_images=len(image_urls) > 0
                 )
-                
-                # استفاده از LLM1 (Light) برای سوالات ساده
-                from app.llm.factory import get_llm_for_category
-                from app.llm.base import Message
-                from app.config.prompts import SystemPrompts
                 
                 llm = get_llm_for_category(classification.category)
                 

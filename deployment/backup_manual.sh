@@ -2,8 +2,9 @@
 
 # ==============================================================================
 # Core RAG System - Manual Backup & Restore Script
-# Version: 1.0.0
+# Version: 2.0.0
 # Description: Manual backup/restore with full system or database-only modes
+#              Supports both manual and auto backup formats
 # ==============================================================================
 
 set -e
@@ -56,6 +57,7 @@ show_usage() {
     echo ""
     echo -e "${YELLOW}Restore Commands:${NC}"
     echo "  restore full <FILE>      Restore full system from backup file"
+    echo "                           (supports both manual AND auto backup formats)"
     echo "  restore db <FILE>        Restore database only from backup file"
     echo ""
     echo -e "${YELLOW}Other Commands:${NC}"
@@ -100,7 +102,7 @@ backup_full() {
     fi
     
     # 1. Backup database
-    print_info "[1/5] Backing up PostgreSQL database..."
+    print_info "[1/7] Backing up PostgreSQL database..."
     if docker-compose -f "$COMPOSE_FILE" exec -T postgres-core \
         pg_dump -U "${POSTGRES_USER:-core_user}" -d "${POSTGRES_DB:-core_db}" > "$temp_dir/database.sql" 2>/dev/null; then
         print_success "Database backed up ($(du -h "$temp_dir/database.sql" | cut -f1))"
@@ -111,7 +113,7 @@ backup_full() {
     fi
     
     # 2. Backup .env file
-    print_info "[2/5] Backing up configuration..."
+    print_info "[2/7] Backing up configuration..."
     if [ -f "$PROJECT_ROOT/.env" ]; then
         cp "$PROJECT_ROOT/.env" "$temp_dir/.env"
         print_success "Configuration backed up"
@@ -120,24 +122,60 @@ backup_full() {
     fi
     
     # 3. Backup Qdrant data
-    print_info "[3/5] Backing up Qdrant vector data..."
+    print_info "[3/7] Backing up Qdrant vector data..."
     if docker-compose -f "$COMPOSE_FILE" exec -T qdrant \
         tar czf - /qdrant/storage > "$temp_dir/qdrant_data.tar.gz" 2>/dev/null; then
         local qdrant_size=$(du -h "$temp_dir/qdrant_data.tar.gz" | cut -f1)
-        print_success "Qdrant data backed up ($qdrant_size)"
+        if [ $(stat -c%s "$temp_dir/qdrant_data.tar.gz" 2>/dev/null || echo 0) -gt 100 ]; then
+            print_success "Qdrant data backed up ($qdrant_size)"
+        else
+            rm -f "$temp_dir/qdrant_data.tar.gz"
+            print_warning "Qdrant backup skipped (empty)"
+        fi
     else
         print_warning "Qdrant backup skipped (may be empty or unavailable)"
     fi
     
-    # 4. Backup alembic version info
-    print_info "[4/5] Backing up migration info..."
+    # 4. Backup Redis data
+    print_info "[4/7] Backing up Redis data..."
+    # Trigger Redis BGSAVE
+    if [ -n "$REDIS_PASSWORD" ]; then
+        docker-compose -f "$COMPOSE_FILE" exec -T redis-core \
+            redis-cli -a "$REDIS_PASSWORD" BGSAVE > /dev/null 2>&1 || true
+    else
+        docker-compose -f "$COMPOSE_FILE" exec -T redis-core \
+            redis-cli BGSAVE > /dev/null 2>&1 || true
+    fi
+    sleep 3
+    # Copy dump.rdb
+    if docker cp core-redis:/data/dump.rdb "$temp_dir/redis.rdb" 2>/dev/null; then
+        print_success "Redis data backed up"
+    else
+        print_warning "Redis backup skipped (no data or container not found)"
+    fi
+    
+    # 5. Backup NPM data
+    print_info "[5/7] Backing up Nginx Proxy Manager data..."
+    NPM_DATA_PATH="/srv/data/nginx-proxy-manager"
+    if [ -d "$NPM_DATA_PATH" ] && [ "$(ls -A $NPM_DATA_PATH 2>/dev/null)" ]; then
+        if tar czf "$temp_dir/npm_data.tar.gz" -C "$NPM_DATA_PATH" . 2>/dev/null; then
+            print_success "NPM data backed up ($(du -h "$temp_dir/npm_data.tar.gz" | cut -f1))"
+        else
+            print_warning "NPM data backup failed"
+        fi
+    else
+        print_warning "NPM data not found, skipping"
+    fi
+    
+    # 6. Backup alembic version info
+    print_info "[6/7] Backing up migration info..."
     if [ -d "$PROJECT_ROOT/alembic/versions" ]; then
         docker-compose -f "$COMPOSE_FILE" exec -T core-api alembic current > "$temp_dir/alembic_version.txt" 2>/dev/null || true
         print_success "Migration info backed up"
     fi
     
-    # 5. Create metadata
-    print_info "[5/5] Creating backup metadata..."
+    # 7. Create metadata
+    print_info "[7/7] Creating backup metadata..."
     cat > "$temp_dir/backup_info.json" <<EOF
 {
     "type": "full",
@@ -147,8 +185,8 @@ backup_full() {
     "database": "${POSTGRES_DB:-core_db}",
     "db_user": "${POSTGRES_USER:-core_user}",
     "hostname": "$(hostname)",
-    "version": "1.0.0",
-    "components": ["database", "config", "qdrant", "alembic_info"]
+    "version": "2.0.0",
+    "components": ["database", "config", "qdrant", "redis", "npm", "alembic_info"]
 }
 EOF
     print_success "Metadata created"
@@ -230,27 +268,32 @@ restore_full() {
         exit 1
     fi
     
-    # Verify it's a full backup
+    # Detect backup type (manual vs auto format)
     local temp_check="/tmp/backup_check_$$"
     mkdir -p "$temp_check"
-    tar xzf "$backup_file" -C "$temp_check" backup_info.json 2>/dev/null || true
+    tar xzf "$backup_file" -C "$temp_check" 2>/dev/null || true
     
-    if [ -f "$temp_check/backup_info.json" ]; then
-        local backup_type=$(grep -o '"type": *"[^"]*"' "$temp_check/backup_info.json" | cut -d'"' -f4)
-        if [ "$backup_type" != "full" ]; then
-            print_error "This is not a full backup file (type: $backup_type)"
-            print_info "Use 'restore db' for database-only backups"
-            rm -rf "$temp_check"
-            exit 1
-        fi
+    local is_auto_backup=false
+    local backup_type="unknown"
+    
+    # Check for auto backup format (files with core_backup_ prefix)
+    if ls "$temp_check"/*_postgres.dump 2>/dev/null | head -1 > /dev/null; then
+        is_auto_backup=true
+        backup_type="auto"
+    elif [ -f "$temp_check/backup_info.json" ]; then
+        backup_type=$(grep -o '"type": *"[^"]*"' "$temp_check/backup_info.json" | cut -d'"' -f4)
+    elif [ -f "$temp_check/database.sql" ]; then
+        backup_type="full"
     fi
     rm -rf "$temp_check"
     
     echo ""
     print_warning "╔══════════════════════════════════════════════════════════╗"
     print_warning "║  WARNING: This will restore from backup and overwrite    ║"
-    print_warning "║  current data including database, config, and Qdrant!    ║"
+    print_warning "║  current data including database, config, Qdrant, etc!   ║"
     print_warning "╚══════════════════════════════════════════════════════════╝"
+    echo ""
+    print_info "Detected backup format: $backup_type"
     echo ""
     read -p "Type 'yes' to confirm restore: " confirm
     
@@ -266,54 +309,131 @@ restore_full() {
     mkdir -p "$temp_dir"
     
     # Extract backup
-    print_info "[1/5] Extracting backup..."
+    print_info "[1/7] Extracting backup..."
     tar xzf "$backup_file" -C "$temp_dir"
     print_success "Backup extracted"
     
     # Stop services
-    print_info "[2/5] Stopping services..."
+    print_info "[2/7] Stopping services..."
     docker-compose -f "$COMPOSE_FILE" stop
     print_success "Services stopped"
     
-    # Restore database
-    if [ -f "$temp_dir/database.sql" ]; then
-        print_info "[3/5] Restoring database..."
-        docker-compose -f "$COMPOSE_FILE" up -d postgres-core
-        sleep 5
-        
+    # Restore database - handle both formats
+    print_info "[3/7] Restoring database..."
+    docker-compose -f "$COMPOSE_FILE" up -d postgres-core
+    sleep 5
+    
+    # Find database file (auto or manual format)
+    local db_file=""
+    local db_format="sql"
+    
+    if [ "$is_auto_backup" = true ]; then
+        db_file=$(ls "$temp_dir"/*_postgres.dump 2>/dev/null | head -1)
+        db_format="custom"
+    elif [ -f "$temp_dir/database.sql" ]; then
+        db_file="$temp_dir/database.sql"
+        db_format="sql"
+    fi
+    
+    if [ -n "$db_file" ] && [ -f "$db_file" ]; then
         docker-compose -f "$COMPOSE_FILE" exec -T postgres-core \
             psql -U "${POSTGRES_USER:-core_user}" -d postgres -c "DROP DATABASE IF EXISTS ${POSTGRES_DB:-core_db};" 2>/dev/null || true
         docker-compose -f "$COMPOSE_FILE" exec -T postgres-core \
             psql -U "${POSTGRES_USER:-core_user}" -d postgres -c "CREATE DATABASE ${POSTGRES_DB:-core_db};"
-        docker-compose -f "$COMPOSE_FILE" exec -T postgres-core \
-            psql -U "${POSTGRES_USER:-core_user}" -d "${POSTGRES_DB:-core_db}" < "$temp_dir/database.sql"
         
-        print_success "Database restored"
+        if [ "$db_format" = "custom" ]; then
+            # Use pg_restore for custom format
+            docker-compose -f "$COMPOSE_FILE" exec -T postgres-core \
+                pg_restore -U "${POSTGRES_USER:-core_user}" -d "${POSTGRES_DB:-core_db}" --no-owner --no-privileges < "$db_file" 2>/dev/null || true
+        else
+            # Use psql for plain SQL
+            docker-compose -f "$COMPOSE_FILE" exec -T postgres-core \
+                psql -U "${POSTGRES_USER:-core_user}" -d "${POSTGRES_DB:-core_db}" < "$db_file"
+        fi
+        print_success "Database restored ($db_format format)"
     else
         print_warning "No database dump found in backup"
     fi
     
-    # Restore .env
+    # Restore .env - handle both formats
+    print_info "[4/7] Restoring configuration..."
+    local env_file=""
     if [ -f "$temp_dir/.env" ]; then
-        print_info "[4/5] Restoring configuration..."
+        env_file="$temp_dir/.env"
+    elif ls "$temp_dir"/*_env 2>/dev/null | head -1 > /dev/null; then
+        env_file=$(ls "$temp_dir"/*_env 2>/dev/null | head -1)
+    fi
+    
+    if [ -n "$env_file" ] && [ -f "$env_file" ]; then
         cp "$PROJECT_ROOT/.env" "$PROJECT_ROOT/.env.backup-before-restore-$TIMESTAMP" 2>/dev/null || true
-        cp "$temp_dir/.env" "$PROJECT_ROOT/.env"
+        cp "$env_file" "$PROJECT_ROOT/.env"
+        # Reload environment
+        set -a
+        source "$PROJECT_ROOT/.env"
+        set +a
         print_success "Configuration restored (old config backed up)"
     else
         print_warning "No configuration found in backup"
     fi
     
-    # Restore Qdrant data
+    # Restore Qdrant data - handle both formats
+    print_info "[5/7] Restoring Qdrant data..."
+    local qdrant_file=""
     if [ -f "$temp_dir/qdrant_data.tar.gz" ]; then
-        print_info "[5/5] Restoring Qdrant data..."
+        qdrant_file="$temp_dir/qdrant_data.tar.gz"
+    elif ls "$temp_dir"/*_qdrant.tar.gz 2>/dev/null | head -1 > /dev/null; then
+        qdrant_file=$(ls "$temp_dir"/*_qdrant.tar.gz 2>/dev/null | head -1)
+    fi
+    
+    if [ -n "$qdrant_file" ] && [ -f "$qdrant_file" ]; then
         docker-compose -f "$COMPOSE_FILE" up -d qdrant
         sleep 5
         docker-compose -f "$COMPOSE_FILE" exec -T qdrant \
-            tar xzf - -C / < "$temp_dir/qdrant_data.tar.gz" 2>/dev/null || \
-            print_warning "Qdrant restore skipped"
+            tar xzf - -C / < "$qdrant_file" 2>/dev/null || \
+            print_warning "Qdrant restore had issues"
         print_success "Qdrant data restored"
     else
         print_warning "No Qdrant data found in backup"
+    fi
+    
+    # Restore Redis data - handle both formats
+    print_info "[6/7] Restoring Redis data..."
+    local redis_file=""
+    if [ -f "$temp_dir/redis.rdb" ]; then
+        redis_file="$temp_dir/redis.rdb"
+    elif ls "$temp_dir"/*_redis.rdb 2>/dev/null | head -1 > /dev/null; then
+        redis_file=$(ls "$temp_dir"/*_redis.rdb 2>/dev/null | head -1)
+    fi
+    
+    if [ -n "$redis_file" ] && [ -f "$redis_file" ]; then
+        docker-compose -f "$COMPOSE_FILE" up -d redis-core
+        sleep 3
+        docker cp "$redis_file" core-redis:/data/dump.rdb 2>/dev/null || \
+            print_warning "Redis restore had issues"
+        # Restart Redis to load the dump
+        docker-compose -f "$COMPOSE_FILE" restart redis-core
+        print_success "Redis data restored"
+    else
+        print_warning "No Redis data found in backup"
+    fi
+    
+    # Restore NPM data - handle both formats
+    print_info "[7/7] Restoring Nginx Proxy Manager data..."
+    local npm_file=""
+    if [ -f "$temp_dir/npm_data.tar.gz" ]; then
+        npm_file="$temp_dir/npm_data.tar.gz"
+    elif ls "$temp_dir"/*_npm_data.tar.gz 2>/dev/null | head -1 > /dev/null; then
+        npm_file=$(ls "$temp_dir"/*_npm_data.tar.gz 2>/dev/null | head -1)
+    fi
+    
+    if [ -n "$npm_file" ] && [ -f "$npm_file" ]; then
+        NPM_DATA_PATH="/srv/data/nginx-proxy-manager"
+        mkdir -p "$NPM_DATA_PATH"
+        tar xzf "$npm_file" -C "$NPM_DATA_PATH" 2>/dev/null || \
+            print_warning "NPM restore had issues"
+        print_success "NPM data restored"
+    else
+        print_warning "No NPM data found in backup"
     fi
     
     # Cleanup
@@ -326,6 +446,9 @@ restore_full() {
     echo ""
     echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
     print_success "Full restore completed successfully!"
+    echo ""
+    print_info "Services are starting up. Wait a few moments and check health."
+    print_info "Run: docker-compose -f $COMPOSE_FILE ps"
     echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
     echo ""
 }
@@ -553,10 +676,22 @@ verify_backup() {
                 print_warning "Configuration missing"
             fi
             
-            if grep -q "qdrant_data" "$temp_dir/contents.txt"; then
+            if grep -q "qdrant_data\|_qdrant" "$temp_dir/contents.txt"; then
                 print_success "Qdrant data present"
             else
                 print_warning "Qdrant data missing"
+            fi
+            
+            if grep -q "redis\|_redis" "$temp_dir/contents.txt"; then
+                print_success "Redis data present"
+            else
+                print_warning "Redis data missing"
+            fi
+            
+            if grep -q "npm_data\|_npm" "$temp_dir/contents.txt"; then
+                print_success "NPM data present"
+            else
+                print_warning "NPM data missing"
             fi
             
             if grep -q "backup_info" "$temp_dir/contents.txt"; then

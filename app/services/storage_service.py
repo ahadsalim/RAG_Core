@@ -37,7 +37,7 @@ class StorageService:
         )
         
         # Bucket names
-        self.documents_bucket = settings.s3_documents_bucket  # advisor-docs
+        self.documents_bucket = settings.s3_documents_bucket  # ingest-system
         self.temp_bucket = settings.s3_temp_bucket  # temp-userfile
         self.bucket_name = settings.s3_bucket_name  # Legacy
         

@@ -223,6 +223,11 @@ run_backup() {
             
             BACKUP_SIZE=$(du -h "${BACKUP_NAME}.tar.gz" | cut -f1)
             print_success "Archive created: ${BACKUP_NAME}.tar.gz (${BACKUP_SIZE})"
+            
+            # Generate SHA256 checksum
+            print_info "Generating SHA256 checksum..."
+            sha256sum "${BACKUP_NAME}.tar.gz" > "${BACKUP_NAME}.tar.gz.sha256"
+            print_success "Checksum created: ${BACKUP_NAME}.tar.gz.sha256"
         else
             print_error "Archive creation failed"
             backup_success=false
@@ -235,19 +240,21 @@ run_backup() {
     # ============================================
     # 7. Transfer to remote backup server
     # ============================================
-    print_info "Transferring backup to remote server..."
+    print_info "Transferring backup and checksum to remote server..."
     
     if rsync -avz --progress \
         -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=30" \
         "${BACKUP_DIR}/${BACKUP_NAME}.tar.gz" \
+        "${BACKUP_DIR}/${BACKUP_NAME}.tar.gz.sha256" \
         "${BACKUP_SERVER_USER}@${BACKUP_SERVER_HOST}:${BACKUP_SERVER_PATH}/" 2>&1; then
         
-        print_success "Backup transferred to remote server"
+        print_success "Backup and checksum transferred to remote server"
         
         # Remove local backup after successful transfer (if configured)
         if [ "${BACKUP_KEEP_LOCAL:-false}" != "true" ]; then
             rm -f "${BACKUP_DIR}/${BACKUP_NAME}.tar.gz"
-            print_info "Local backup removed (transferred to remote)"
+            rm -f "${BACKUP_DIR}/${BACKUP_NAME}.tar.gz.sha256"
+            print_info "Local backup and checksum removed (transferred to remote)"
         fi
     else
         print_error "Backup transfer failed - keeping local copy"
@@ -261,8 +268,9 @@ run_backup() {
     
     if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
         "${BACKUP_SERVER_USER}@${BACKUP_SERVER_HOST}" \
-        "find ${BACKUP_SERVER_PATH} -name 'core_backup_*.tar.gz' -mtime +${RETENTION_DAYS} -delete" 2>/dev/null; then
-        print_success "Old remote backups cleaned"
+        "find ${BACKUP_SERVER_PATH} -name 'core_backup_*.tar.gz' -mtime +${RETENTION_DAYS} -delete && \
+         find ${BACKUP_SERVER_PATH} -name 'core_backup_*.tar.gz.sha256' -mtime +${RETENTION_DAYS} -delete" 2>/dev/null; then
+        print_success "Old remote backups and checksums cleaned"
     fi
     
     # ============================================
@@ -270,6 +278,7 @@ run_backup() {
     # ============================================
     print_info "Cleaning old local backups (keeping last ${LOCAL_RETENTION_DAYS} days)..."
     find "$BACKUP_DIR" -name "core_backup_*.tar.gz" -mtime +${LOCAL_RETENTION_DAYS} -delete 2>/dev/null
+    find "$BACKUP_DIR" -name "core_backup_*.tar.gz.sha256" -mtime +${LOCAL_RETENTION_DAYS} -delete 2>/dev/null
     print_success "Local cleanup completed"
     
     # ============================================

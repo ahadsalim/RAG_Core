@@ -200,12 +200,12 @@ GENERATED_PASSWORDS=""
 if [ ! -f "$PROJECT_ROOT/.env" ]; then
     print_warning ".env file not found. Creating from template..."
     
-    if [ ! -f "$SCRIPT_DIR/config/.env.example" ]; then
-        print_error "Template file not found: $SCRIPT_DIR/config/.env.example"
+    if [ ! -f "$SCRIPT_DIR/.env.example" ]; then
+        print_error "Template file not found: $SCRIPT_DIR/.env.example"
         exit 1
     fi
     
-    cp "$SCRIPT_DIR/config/.env.example" "$PROJECT_ROOT/.env"
+    cp "$SCRIPT_DIR/.env.example" "$PROJECT_ROOT/.env"
     
     # Generate secure passwords
     JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')

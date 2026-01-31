@@ -22,14 +22,10 @@ logger = structlog.get_logger()
 core_engine: AsyncEngine | None = None
 core_session_factory: async_sessionmaker[AsyncSession] | None = None
 
-# Ingest database engine (read-only)
-ingest_engine: AsyncEngine | None = None
-ingest_session_factory: async_sessionmaker[AsyncSession] | None = None
-
 
 async def init_db():
     """Initialize database connections."""
-    global core_engine, core_session_factory, ingest_engine, ingest_session_factory
+    global core_engine, core_session_factory
     
     # Core database
     core_engine = create_async_engine(
@@ -39,7 +35,6 @@ async def init_db():
         max_overflow=settings.database_max_overflow,
         pool_timeout=settings.database_pool_timeout,
         pool_pre_ping=True,
-        # poolclass is automatically selected for async engines
     )
     
     core_session_factory = async_sessionmaker(
@@ -48,39 +43,16 @@ async def init_db():
         expire_on_commit=False,
     )
     
-    # Ingest database (read-only) - optional
-    if settings.ingest_database_url:
-        ingest_engine = create_async_engine(
-            str(settings.ingest_database_url),
-            echo=False,
-            pool_size=settings.ingest_database_pool_size,
-            pool_pre_ping=True,
-            # poolclass is automatically selected for async engines
-        )
-        
-        ingest_session_factory = async_sessionmaker(
-            ingest_engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
-        logger.info("Ingest database engine initialized")
-    else:
-        logger.warning("Ingest database URL not configured - sync features will be disabled")
-    
-    logger.info("Database engines initialized")
+    logger.info("Database engine initialized")
 
 
 async def close_db():
     """Close database connections."""
-    global core_engine, ingest_engine
+    global core_engine
     
     if core_engine:
         await core_engine.dispose()
-        logger.info("Core database engine closed")
-    
-    if ingest_engine:
-        await ingest_engine.dispose()
-        logger.info("Ingest database engine closed")
+        logger.info("Database engine closed")
 
 
 @asynccontextmanager
@@ -100,30 +72,8 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-@asynccontextmanager
-async def get_ingest_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get Ingest database session (read-only)."""
-    if not ingest_session_factory:
-        raise RuntimeError(
-            "Ingest database not configured. "
-            "Please set INGEST_DATABASE_URL in .env to enable sync features."
-        )
-    
-    async with ingest_session_factory() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
-
-
 # Dependency for FastAPI
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Database dependency for FastAPI."""
     async with get_session() as session:
-        yield session
-
-
-async def get_ingest_db() -> AsyncGenerator[AsyncSession, None]:
-    """Ingest database dependency for FastAPI."""
-    async with get_ingest_session() as session:
         yield session

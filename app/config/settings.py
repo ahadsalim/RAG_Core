@@ -62,18 +62,6 @@ class Settings(BaseSettings):
     database_pool_timeout: int = Field(default=30, ge=1)
     database_echo: bool = Field(default=False)
     
-    # Ingest Database (Read-only)
-    ingest_database_url: Optional[str] = Field(default=None)
-    ingest_database_pool_size: int = Field(default=10, ge=1)
-    
-    @field_validator('ingest_database_url', mode='before')
-    @classmethod
-    def validate_ingest_db_url(cls, v):
-        """Allow empty string for ingest_database_url."""
-        if v == "" or v is None:
-            return None
-        return v
-    
     # Qdrant Vector Database
     qdrant_host: str = Field(default="localhost")
     qdrant_port: int = Field(default=7333)
@@ -236,10 +224,8 @@ class Settings(BaseSettings):
         description="Hours to keep user uploaded files in S3 before deletion (file analysis stays in conversation memory)"
     )
     
-    # External Services
-    ingest_api_url: str = Field(default="http://localhost:8000/api")
+    # External Services - API Keys for authentication
     ingest_api_key: Optional[str] = Field(default=None)
-    users_api_url: str = Field(default="http://localhost:3001/api")
     users_api_key: Optional[str] = Field(default=None)
     
     # System Limits

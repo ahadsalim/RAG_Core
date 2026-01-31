@@ -193,35 +193,6 @@ async def sync_embeddings(
         )
 
 
-# Trigger full sync
-@router.post("/trigger-full-sync")
-async def trigger_full_sync(
-    background_tasks: BackgroundTasks,
-    api_key: str = Depends(verify_sync_api_key)
-):
-    """
-    Trigger a full synchronization from Ingest pgvector to Qdrant.
-    
-    This is a heavy operation and should be run carefully.
-    Uses Celery for async processing.
-    """
-    try:
-        # Run sync via Celery
-        from app.tasks.sync import trigger_full_sync_task
-        task = trigger_full_sync_task.delay(batch_size=100)
-        
-        return {
-            "status": "initiated",
-            "message": "Full sync started in background",
-            "task_id": task.id
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to trigger sync: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to trigger sync: {str(e)}"
-        )
 
 
 # Get sync status
@@ -250,35 +221,6 @@ async def get_sync_status(
         )
 
 
-# Process sync queue
-@router.post("/process-queue")
-async def process_sync_queue(
-    background_tasks: BackgroundTasks,
-    api_key: str = Depends(verify_sync_api_key)
-):
-    """
-    Process pending items from sync queue.
-    
-    This reads from the Ingest sync queue table and processes pending jobs.
-    """
-    try:
-        sync_service = SyncService()
-        result = await sync_service.sync_from_sync_queue()
-        
-        return {
-            "status": "success",
-            "processed": result.get("total_processed", 0),
-            "success": result.get("total_success", 0),
-            "errors": result.get("total_errors", 0),
-            "duration": result.get("duration", 0)
-        }
-        
-    except Exception as e:
-        logger.error(f"Queue processing failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Queue processing failed: {str(e)}"
-        )
 
 
 # Delete document embeddings
@@ -338,24 +280,6 @@ async def get_node(
         )
 
 
-# Helper functions
-async def run_full_sync():
-    """Run full synchronization in background."""
-    try:
-        sync_service = SyncService()
-        result = await sync_service.sync_embeddings_from_pgvector(
-            batch_size=100
-        )
-        
-        logger.info(
-            "Full sync completed",
-            total_processed=result.get("total_processed"),
-            total_synced=result.get("total_synced"),
-            duration=result.get("duration")
-        )
-        
-    except Exception as e:
-        logger.error(f"Full sync failed: {e}")
 
 
 # Rate limiting using Redis (per API key)

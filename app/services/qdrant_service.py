@@ -502,6 +502,36 @@ class QdrantService:
             logger.error(f"Hybrid search failed: {e}")
             raise
     
+    async def delete_by_point_id(self, point_id: str) -> bool:
+        """
+        Delete a specific vector/node by its point ID.
+        
+        Args:
+            point_id: Point ID to delete (can be string or int)
+            
+        Returns:
+            True if deleted successfully
+        """
+        try:
+            # Normalize point_id to Qdrant format
+            normalized_id = self._to_point_id(point_id)
+            
+            # Delete the specific point
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=PointIdsList(
+                    points=[normalized_id]
+                ),
+                wait=True
+            )
+            
+            logger.info(f"Deleted point: {point_id} (normalized: {normalized_id})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to delete point {point_id}: {e}")
+            raise
+    
     async def delete_by_document_id(self, document_id: str) -> int:
         """
         Delete all vectors for a specific document.

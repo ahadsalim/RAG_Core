@@ -232,6 +232,13 @@ class RAGPipeline:
                     count=len(chunks)
                 )
             
+            # Step 4.5: Expand legal context for lunit nodes
+            chunks = await self._expand_legal_context(chunks)
+            logger.info(
+                "Context expansion completed",
+                final_count=len(chunks)
+            )
+            
             # Step 5: Generate answer
             logger.info(
                 "Generating answer",
@@ -624,6 +631,136 @@ class RAGPipeline:
         # Fallback: Simple score-based reranking
         sorted_chunks = sorted(chunks, key=lambda x: x.score, reverse=True)[:top_k]
         return sorted_chunks, []
+    
+    async def _expand_legal_context(self, chunks: List[RAGChunk]) -> List[RAGChunk]:
+        """
+        توسعه context برای نودهای lunit (مواد حقوقی).
+        اگر chunk یک بخش از یک ماده حقوقی است، تمام بخش‌های آن ماده را بازیابی و اضافه می‌کند.
+        
+        فقط برای document_type="lunit" کار می‌کند.
+        برای qaentry و textentry هیچ کاری انجام نمی‌شود.
+        
+        Args:
+            chunks: لیست chunks بازیابی شده
+            
+        Returns:
+            chunks با context توسعه یافته
+        """
+        if not chunks:
+            return chunks
+        
+        expanded_chunks = []
+        seen_articles = set()  # برای جلوگیری از تکرار: (document_id, unit_number)
+        expansion_count = 0
+        
+        for chunk in chunks:
+            metadata = chunk.metadata
+            
+            # فقط برای lunit nodes
+            doc_type = metadata.get("document_type", "")
+            if doc_type != "lunit":
+                # qaentry و textentry را بدون تغییر اضافه کن
+                expanded_chunks.append(chunk)
+                continue
+            
+            # استخراج اطلاعات ماده
+            document_id = metadata.get("document_id")
+            unit_number = metadata.get("unit_number")
+            
+            if not document_id or not unit_number:
+                # اگر اطلاعات کامل نیست، همان chunk را اضافه کن
+                expanded_chunks.append(chunk)
+                continue
+            
+            # کلید یکتا برای این ماده
+            article_key = f"{document_id}_{unit_number}"
+            
+            if article_key in seen_articles:
+                # این ماده قبلاً پردازش شده، رد شو
+                continue
+            
+            seen_articles.add(article_key)
+            
+            # بازیابی تمام chunks مربوط به این ماده از Qdrant
+            try:
+                # استفاده از scroll برای بازیابی تمام chunks با فیلتر
+                from qdrant_client.models import Filter, FieldCondition, MatchValue
+                
+                scroll_filter = Filter(
+                    must=[
+                        FieldCondition(
+                            key="document_id",
+                            match=MatchValue(value=document_id)
+                        ),
+                        FieldCondition(
+                            key="unit_number",
+                            match=MatchValue(value=unit_number)
+                        )
+                    ]
+                )
+                
+                # Scroll through all matching points
+                scroll_result = self.qdrant.client.scroll(
+                    collection_name=self.qdrant.collection_name,
+                    scroll_filter=scroll_filter,
+                    limit=100,  # حداکثر تعداد chunks برای یک ماده
+                    with_payload=True,
+                    with_vectors=False
+                )
+                
+                article_points = scroll_result[0]  # لیست points
+                
+                if not article_points:
+                    # اگر چیزی پیدا نشد، همان chunk اصلی را اضافه کن
+                    expanded_chunks.append(chunk)
+                    continue
+                
+                # تبدیل points به RAGChunk و مرتب‌سازی بر اساس chunk_index
+                article_chunks = []
+                for point in article_points:
+                    payload = point.payload
+                    article_chunks.append(RAGChunk(
+                        text=payload.get("text", ""),
+                        score=chunk.score,  # همان score chunk اصلی
+                        source=payload.get("source", ""),
+                        metadata=payload,
+                        document_id=payload.get("document_id")
+                    ))
+                
+                # مرتب‌سازی بر اساس chunk_index
+                article_chunks.sort(key=lambda x: x.metadata.get("chunk_index", 0))
+                
+                # اضافه کردن به لیست نهایی
+                expanded_chunks.extend(article_chunks)
+                expansion_count += len(article_chunks) - 1  # تعداد chunks اضافه شده
+                
+                logger.debug(
+                    "Expanded legal article",
+                    document_id=document_id,
+                    unit_number=unit_number,
+                    work_title=metadata.get("work_title", "")[:50],
+                    chunks_added=len(article_chunks)
+                )
+                
+            except Exception as e:
+                logger.warning(
+                    f"Failed to expand legal context for article {unit_number}: {e}",
+                    document_id=document_id,
+                    unit_number=unit_number
+                )
+                # در صورت خطا، همان chunk اصلی را اضافه کن
+                expanded_chunks.append(chunk)
+        
+        if expansion_count > 0:
+            logger.info(
+                "Legal context expansion completed",
+                original_chunks=len(chunks),
+                expanded_chunks=len(expanded_chunks),
+                additional_chunks=expansion_count,
+                articles_expanded=len(seen_articles)
+            )
+        
+        return expanded_chunks
     
     async def _generate_answer(
         self,

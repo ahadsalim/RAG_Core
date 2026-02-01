@@ -223,27 +223,38 @@ async def get_sync_status(
 
 
 
-# Delete document embeddings
-@router.delete("/document/{document_id}")
-async def delete_document_embeddings(
-    document_id: str,
+# Delete single node/embedding by point ID
+@router.delete("/node/{point_id}")
+async def delete_node(
+    point_id: str,
     api_key: str = Depends(verify_sync_api_key)
 ):
-    """Delete all embeddings for a specific document (async via Celery)."""
+    """
+    Delete a specific node/embedding by its point ID.
+    
+    **Use Case:** Called by Ingest system when:
+    - A single embedding/chunk is deleted
+    - Content is updated and old embedding needs removal
+    
+    **Example Request:**
+    ```bash
+    curl -X DELETE https://core.domain.com/api/v1/sync/node/953652110735163 \
+      -H "X-API-Key: your-ingest-api-key"
+    ```
+    """
     try:
-        # Run delete via Celery for better reliability
-        from app.tasks.sync import delete_document_embeddings_task
-        task = delete_document_embeddings_task.delay(document_id)
+        qdrant_service = QdrantService()
+        await qdrant_service.delete_by_point_id(point_id)
         
         return {
-            "status": "initiated",
-            "message": "Document deletion started",
-            "document_id": document_id,
-            "task_id": task.id
+            "status": "success",
+            "message": "Node deleted successfully",
+            "point_id": point_id,
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
-        logger.error(f"Delete failed: {e}")
+        logger.error(f"Delete node failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Delete failed: {str(e)}"

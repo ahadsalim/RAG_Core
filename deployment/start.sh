@@ -258,6 +258,72 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
         sed -i "s#CORS_ORIGINS=.*#CORS_ORIGINS=\"https://$DOMAIN_INPUT,http://localhost:3000\"#g" "$PROJECT_ROOT/.env"
     fi
     
+
+    # --- Ask for LLM API Keys ---
+    echo ""
+    print_section "LLM Configuration"
+    echo -e "${YELLOW}LLM1 (Light) - for general queries (e.g. gpt-4o-mini)${NC}"
+    read -p "Enter LLM1 API Key (OpenAI or compatible): " LLM1_KEY_INPUT
+    if [ -n "$LLM1_KEY_INPUT" ]; then
+        sed -i "s#LLM1_API_KEY=""#LLM1_API_KEY="$LLM1_KEY_INPUT"#g" "$PROJECT_ROOT/.env"
+    fi
+    
+    read -p "Enter LLM1 Base URL [https://api.openai.com/v1]: " LLM1_URL_INPUT
+    if [ -n "$LLM1_URL_INPUT" ]; then
+        sed -i "s#LLM1_BASE_URL="https://api.openai.com/v1"#LLM1_BASE_URL="$LLM1_URL_INPUT"#g" "$PROJECT_ROOT/.env"
+    fi
+    
+    read -p "Enter LLM1 Model [gpt-4o-mini]: " LLM1_MODEL_INPUT
+    if [ -n "$LLM1_MODEL_INPUT" ]; then
+        sed -i "s#LLM1_MODEL="gpt-4o-mini"#LLM1_MODEL="$LLM1_MODEL_INPUT"#g" "$PROJECT_ROOT/.env"
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}LLM2 (Pro) - for business queries (e.g. gpt-4o)${NC}"
+    read -p "Enter LLM2 API Key (leave empty to use LLM1 key): " LLM2_KEY_INPUT
+    if [ -n "$LLM2_KEY_INPUT" ]; then
+        sed -i "s#LLM2_API_KEY=""#LLM2_API_KEY="$LLM2_KEY_INPUT"#g" "$PROJECT_ROOT/.env"
+    elif [ -n "$LLM1_KEY_INPUT" ]; then
+        sed -i "s#LLM2_API_KEY=""#LLM2_API_KEY="$LLM1_KEY_INPUT"#g" "$PROJECT_ROOT/.env"
+    fi
+    
+    read -p "Enter LLM2 Base URL [https://api.openai.com/v1]: " LLM2_URL_INPUT
+    if [ -n "$LLM2_URL_INPUT" ]; then
+        sed -i "s#LLM2_BASE_URL="https://api.openai.com/v1"#LLM2_BASE_URL="$LLM2_URL_INPUT"#g" "$PROJECT_ROOT/.env"
+    elif [ -n "$LLM1_URL_INPUT" ]; then
+        sed -i "s#LLM2_BASE_URL="https://api.openai.com/v1"#LLM2_BASE_URL="$LLM1_URL_INPUT"#g" "$PROJECT_ROOT/.env"
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}Classification LLM (for query categorization)${NC}"
+    read -p "Enter Classification LLM API Key (leave empty to use LLM1 key): " CLASS_KEY_INPUT
+    if [ -n "$CLASS_KEY_INPUT" ]; then
+        sed -i "s#LLM_CLASSIFICATION_API_KEY=""#LLM_CLASSIFICATION_API_KEY="$CLASS_KEY_INPUT"#g" "$PROJECT_ROOT/.env"
+    elif [ -n "$LLM1_KEY_INPUT" ]; then
+        sed -i "s#LLM_CLASSIFICATION_API_KEY=""#LLM_CLASSIFICATION_API_KEY="$LLM1_KEY_INPUT"#g" "$PROJECT_ROOT/.env"
+    fi
+    
+    if [ -n "$LLM1_URL_INPUT" ]; then
+        sed -i "s#LLM_CLASSIFICATION_BASE_URL="https://api.openai.com/v1"#LLM_CLASSIFICATION_BASE_URL="$LLM1_URL_INPUT"#g" "$PROJECT_ROOT/.env"
+    fi
+    
+    # --- Ask for S3/MinIO ---
+    echo ""
+    print_section "S3/MinIO Configuration"
+    read -p "Enter S3/MinIO Endpoint URL [http://localhost:9000]: " S3_URL_INPUT
+    if [ -n "$S3_URL_INPUT" ]; then
+        sed -i "s#S3_ENDPOINT_URL="http://localhost:9000"#S3_ENDPOINT_URL="$S3_URL_INPUT"#g" "$PROJECT_ROOT/.env"
+    fi
+    
+    read -p "Enter S3 Access Key [minioadmin]: " S3_KEY_INPUT
+    if [ -n "$S3_KEY_INPUT" ]; then
+        sed -i "s#S3_ACCESS_KEY_ID="minioadmin"#S3_ACCESS_KEY_ID="$S3_KEY_INPUT"#g" "$PROJECT_ROOT/.env"
+    fi
+    
+    read -p "Enter S3 Secret Key [minioadmin]: " S3_SECRET_INPUT
+    if [ -n "$S3_SECRET_INPUT" ]; then
+        sed -i "s#S3_SECRET_ACCESS_KEY="minioadmin"#S3_SECRET_ACCESS_KEY="$S3_SECRET_INPUT"#g" "$PROJECT_ROOT/.env"
+    fi
     print_success ".env file created with secure passwords"
 else
     print_success ".env file already exists"

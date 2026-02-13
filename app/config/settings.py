@@ -145,6 +145,19 @@ class Settings(BaseSettings):
     def llm_temperature(self) -> float:
         return self.llm1_temperature
     
+    # --- Backward Compatibility for fallback settings ---
+    @property
+    def llm_fallback_api_key(self) -> Optional[str]:
+        return self.llm1_fallback_api_key
+    
+    @property
+    def llm_fallback_base_url(self) -> Optional[str]:
+        return self.llm1_fallback_base_url
+    
+    @property
+    def llm_fallback_model(self) -> Optional[str]:
+        return self.llm1_fallback_model
+    
     # LLM Classification (for query categorization)
     enable_query_classification: bool = Field(default=True, description="Enable query classification (can disable for faster response)")
     

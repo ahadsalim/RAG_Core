@@ -98,7 +98,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Trusted host (security)
 if settings.is_production:
-    allowed_hosts = {"localhost", "127.0.0.1"}
+    allowed_hosts = {"localhost", "127.0.0.1", "10.10.10.20", "10.10.10.30", "10.10.10.40", "10.10.10.50"}
     if settings.domain_name:
         allowed_hosts.add(settings.domain_name)
         parts = settings.domain_name.split(".")

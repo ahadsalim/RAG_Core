@@ -9,7 +9,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     POETRY_NO_INTERACTION=1
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
     gcc \
     g++ \
     postgresql-client \
@@ -17,8 +19,7 @@ RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-fas \
     tesseract-ocr-eng \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    ffmpeg
 
 # Set work directory
 WORKDIR /app
@@ -27,13 +28,16 @@ WORKDIR /app
 COPY deployment/requirements.txt .
 
 # Install Python dependencies in stages to avoid resolution-too-deep
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip setuptools wheel
 
 # Stage 1: Core dependencies (numpy first to avoid conflicts)
-RUN pip install --no-cache-dir "numpy>=1.24.3,<2.0.0"
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install "numpy>=1.24.3,<2.0.0"
 
 # Stage 2: Install from requirements with increased timeout and retries
-RUN pip install --no-cache-dir \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install \
     --timeout 300 \
     --retries 5 \
     -r requirements.txt

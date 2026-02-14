@@ -50,6 +50,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    restart: unless-stopped
 
   # Redis for Core
   redis-core:
@@ -67,6 +69,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
   # Qdrant Vector Database
   qdrant:
@@ -88,6 +92,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    restart: unless-stopped
 
   # Celery Worker
   celery-worker:

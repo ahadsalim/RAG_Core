@@ -9,11 +9,6 @@ from app.tasks.cleanup import *
 from app.tasks.user import *
 
 __all__ = [
-    # Sync tasks
-    'sync_embeddings_task',
-    'process_sync_queue',
-    'trigger_full_sync_task',
-    
     # Notification tasks
     'send_query_result_to_users',
     'send_usage_statistics',
@@ -24,7 +19,7 @@ __all__ = [
     'cleanup_query_cache',
     'cleanup_old_conversations',
     'cleanup_failed_tasks',
-    'cleanup_expired_temp_files',  # Consolidated from cleanup_files.py
+    'cleanup_expired_temp_files',
     
     # User tasks (statistics only - limits handled by Users system)
     'update_user_statistics',

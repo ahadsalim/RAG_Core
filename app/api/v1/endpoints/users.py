@@ -29,10 +29,8 @@ class UserProfileResponse(BaseModel):
     username: str
     email: Optional[str]
     full_name: Optional[str]
-    tier: str
-    daily_query_limit: int
-    daily_query_count: int
     total_query_count: int
+    total_tokens_used: int
     language: str
     timezone: str
     last_active_at: Optional[datetime]
@@ -85,10 +83,8 @@ async def get_user_profile(
         username=user.username,
         email=user.email,
         full_name=user.full_name,
-        tier=user.tier.value,
-        daily_query_limit=user.daily_query_limit,
-        daily_query_count=user.daily_query_count,
         total_query_count=user.total_query_count,
+        total_tokens_used=user.total_tokens_used,
         language=user.language,
         timezone=user.timezone,
         last_active_at=user.last_active_at,
@@ -314,12 +310,11 @@ async def get_user_statistics(
     
     return {
         "total_queries": user.total_query_count,
-        "daily_queries": user.daily_query_count,
-        "daily_limit": user.daily_query_limit,
         "total_tokens": user.total_tokens_used,
+        "total_input_tokens": user.total_input_tokens,
+        "total_output_tokens": user.total_output_tokens,
         "total_conversations": conversation_count,
         "total_feedback": user.total_feedback_given,
-        "account_tier": user.tier.value,
         "created_at": user.created_at,
         "last_active": user.last_active_at
     }

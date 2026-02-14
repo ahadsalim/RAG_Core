@@ -3,12 +3,12 @@ Administration API Endpoints
 Admin endpoints for system management and monitoring
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Header
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, text as sa_text
 from pydantic import BaseModel
 import structlog
 
@@ -222,7 +222,7 @@ async def clear_cache(
         
         if cache_type in ["query", "all"]:
             await db.execute(
-                "DELETE FROM query_cache WHERE expires_at < NOW()"
+                sa_text("DELETE FROM query_cache WHERE expires_at < NOW()")
             )
             await db.commit()
             cleared["query"] = True
@@ -245,16 +245,12 @@ async def clear_cache(
 async def list_users(
     limit: int = Query(default=20, le=100),
     offset: int = Query(default=0, ge=0),
-    tier: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     admin: str = Depends(verify_admin_access)
 ):
     """List all users with filtering options."""
     try:
         stmt = select(UserProfile)
-        
-        if tier:
-            stmt = stmt.where(UserProfile.tier == tier)
         
         stmt = stmt.order_by(UserProfile.created_at.desc())
         stmt = stmt.limit(limit).offset(offset)
@@ -265,11 +261,11 @@ async def list_users(
         return [
             {
                 "id": str(user.id),
+                "external_user_id": user.external_user_id,
                 "username": user.username,
                 "email": user.email,
-                "tier": user.tier.value,
                 "total_queries": user.total_query_count,
-                "daily_queries": user.daily_query_count,
+                "total_tokens_used": user.total_tokens_used,
                 "last_active": user.last_active_at,
                 "created_at": user.created_at
             }
@@ -284,53 +280,9 @@ async def list_users(
         )
 
 
-# Update user tier
-@router.patch("/users/{user_id}/tier")
-async def update_user_tier(
-    user_id: str,
-    tier: str = Query(..., pattern="^(free|basic|premium|enterprise)$"),
-    db: AsyncSession = Depends(get_db),
-    admin: str = Depends(verify_admin_access)
-):
-    """Update a user's subscription tier."""
-    try:
-        user = await db.get(UserProfile, user_id)
-        
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
-        
-        # Update tier and limits
-        from app.models.user import UserTier
-        user.tier = UserTier(tier)
-        
-        # Update limits based on tier
-        tier_limits = {
-            "free": 50,
-            "basic": 200,
-            "premium": 1000,
-            "enterprise": -1  # Unlimited
-        }
-        
-        user.daily_query_limit = tier_limits.get(tier, 50)
-        
-        await db.commit()
-        
-        return {
-            "status": "success",
-            "user_id": user_id,
-            "new_tier": tier,
-            "new_limit": user.daily_query_limit
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to update user tier: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update user tier"
-        )
+# NOTE: update_user_tier endpoint removed.
+# Subscription/tier management is handled entirely by the Users system.
+# See: Users system /srv/backend/subscriptions/models.py
 
 
 # Optimize Qdrant

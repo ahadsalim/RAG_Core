@@ -69,9 +69,8 @@ def update_user_statistics(self, user_id: str) -> Dict[str, Any]:
                 )
                 
                 # Update user profile
-                user.total_conversations = total_conversations or 0
                 user.total_tokens_used = total_tokens or 0
-                user.last_stats_update = datetime.utcnow()
+                user.last_active_at = datetime.utcnow()
                 
                 await session.commit()
                 
@@ -107,81 +106,6 @@ def update_user_statistics(self, user_id: str) -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
-@celery_app.task(
-    name="app.tasks.user.calculate_user_tier",
-    bind=True
-)
-def calculate_user_tier(self, user_id: str) -> Dict[str, Any]:
-    """
-    Calculate and update user tier based on usage.
-    
-    Args:
-        user_id: User ID
-        
-    Returns:
-        Tier calculation result
-    """
-    try:
-        import asyncio
-        from app.db.session import get_session
-        from app.models.user import UserProfile, UserTier
-        
-        async def calculate():
-            async with get_session() as session:
-                user = await session.get(UserProfile, user_id)
-                if not user:
-                    return {"status": "not_found"}
-                
-                # Calculate tier based on usage
-                old_tier = user.tier
-                
-                if user.total_query_count > 10000:
-                    new_tier = UserTier.ENTERPRISE
-                elif user.total_query_count > 1000:
-                    new_tier = UserTier.PREMIUM
-                elif user.total_query_count > 100:
-                    new_tier = UserTier.BASIC
-                else:
-                    new_tier = UserTier.FREE
-                
-                if new_tier != old_tier:
-                    user.tier = new_tier
-                    user.tier_updated_at = datetime.utcnow()
-                    await session.commit()
-                    
-                    return {
-                        "status": "updated",
-                        "user_id": user_id,
-                        "old_tier": old_tier.value,
-                        "new_tier": new_tier.value
-                    }
-                else:
-                    return {
-                        "status": "unchanged",
-                        "user_id": user_id,
-                        "tier": old_tier.value
-                    }
-        
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(calculate())
-        
-        if result.get("status") == "updated":
-            logger.info(
-                "User tier updated",
-                task_id=self.request.id,
-                **result
-            )
-        
-        return result
-        
-    except Exception as e:
-        logger.error(
-            f"Failed to calculate user tier: {e}",
-            task_id=self.request.id,
-            user_id=user_id
-        )
-        return {"status": "error", "error": str(e)}
+# NOTE: calculate_user_tier task removed.
+# Subscription/tier management is handled entirely by the Users system.
+# See: Users system /srv/backend/subscriptions/models.py

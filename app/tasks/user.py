@@ -7,7 +7,7 @@ RAG Core only tracks usage statistics for analytics purposes.
 """
 
 from typing import Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import structlog
 
 from app.celery_app import celery_app
@@ -70,7 +70,7 @@ def update_user_statistics(self, user_id: str) -> Dict[str, Any]:
                 
                 # Update user profile
                 user.total_tokens_used = total_tokens or 0
-                user.last_active_at = datetime.utcnow()
+                user.last_active_at = datetime.now(timezone.utc)
                 
                 await session.commit()
                 
@@ -82,12 +82,7 @@ def update_user_statistics(self, user_id: str) -> Dict[str, Any]:
                     "total_tokens": total_tokens or 0
                 }
         
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(update_stats())
+        result = asyncio.run(update_stats())
         
         logger.info(
             "User statistics updated",

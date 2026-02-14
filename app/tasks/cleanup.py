@@ -4,7 +4,7 @@ Async tasks for system cleanup and maintenance
 """
 
 from typing import Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import structlog
 
 from app.celery_app import celery_app
@@ -57,12 +57,7 @@ def cleanup_old_cache(self) -> Dict[str, Any]:
             
             return {"checked": checked, "deleted": deleted}
         
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(cleanup())
+        result = asyncio.run(cleanup())
         
         logger.info(
             "Cache cleanup completed",
@@ -100,7 +95,7 @@ def cleanup_query_cache(self, days: int = 30) -> Dict[str, Any]:
         
         async def cleanup():
             async with get_session() as session:
-                cutoff_date = datetime.utcnow() - timedelta(days=days)
+                cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
                 
                 # Delete old cache entries
                 stmt = delete(QueryCache).where(
@@ -112,12 +107,7 @@ def cleanup_query_cache(self, days: int = 30) -> Dict[str, Any]:
                 
                 return {"deleted": result.rowcount}
         
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(cleanup())
+        result = asyncio.run(cleanup())
         
         logger.info(
             f"Query cache cleanup completed (older than {days} days)",
@@ -154,14 +144,14 @@ def cleanup_old_conversations(self, days: int = 90) -> Dict[str, Any]:
         
         async def cleanup():
             async with get_session() as session:
-                cutoff_date = datetime.utcnow() - timedelta(days=days)
+                cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
                 
                 # Mark old conversations as archived
                 stmt = (
                     update(Conversation)
                     .where(Conversation.last_message_at < cutoff_date)
                     .where(Conversation.is_archived == False)
-                    .values(is_archived=True, archived_at=datetime.utcnow())
+                    .values(is_archived=True, archived_at=datetime.now(timezone.utc))
                 )
                 
                 result = await session.execute(stmt)
@@ -169,12 +159,7 @@ def cleanup_old_conversations(self, days: int = 90) -> Dict[str, Any]:
                 
                 return {"archived": result.rowcount}
         
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(cleanup())
+        result = asyncio.run(cleanup())
         
         logger.info(
             f"Conversations cleanup completed (older than {days} days)",
@@ -233,12 +218,7 @@ def cleanup_failed_tasks(self) -> Dict[str, Any]:
             
             return {"deleted": deleted}
         
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(cleanup())
+        result = asyncio.run(cleanup())
         
         logger.info(
             "Failed tasks cleanup completed",
@@ -273,12 +253,7 @@ def cleanup_expired_temp_files(self) -> Dict[str, Any]:
         
         storage_service = get_storage_service()
         
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        deleted_count = loop.run_until_complete(storage_service.cleanup_expired_files())
+        deleted_count = asyncio.run(storage_service.cleanup_expired_files())
         
         logger.info(
             "Temp files cleanup completed",

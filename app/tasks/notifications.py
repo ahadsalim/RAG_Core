@@ -4,7 +4,7 @@ Async tasks for sending notifications and updates
 """
 
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 import httpx
 import structlog
 
@@ -56,7 +56,7 @@ def send_query_result_to_users(
         payload = {
             "event_type": "query_completed",
             "user_id": user_id,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "data": {
                 "conversation_id": conversation_id,
                 "message_id": message_id,
@@ -136,7 +136,7 @@ def send_usage_statistics(self) -> Dict[str, Any]:
         async def get_stats():
             async with get_session() as session:
                 # Get hourly stats
-                one_hour_ago = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+                one_hour_ago = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
                 
                 total_queries = await session.scalar(
                     select(func.count()).select_from(Message).where(
@@ -161,20 +161,15 @@ def send_usage_statistics(self) -> Dict[str, Any]:
                     "total_tokens": total_tokens or 0,
                     "active_users": active_users or 0,
                     "period_start": one_hour_ago.isoformat() + "Z",
-                    "period_end": datetime.utcnow().isoformat() + "Z"
+                    "period_end": datetime.now(timezone.utc).isoformat() + "Z"
                 }
         
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        stats = loop.run_until_complete(get_stats())
+        stats = asyncio.run(get_stats())
         
         # Send to Users API
         payload = {
             "event_type": "usage_statistics",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "data": stats
         }
         
@@ -234,7 +229,7 @@ def send_system_notification(
         
         payload = {
             "event_type": "system_notification",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "data": {
                 "type": notification_type,
                 "title": title,

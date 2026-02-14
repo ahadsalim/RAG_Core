@@ -5,10 +5,10 @@ Handles all vector operations and semantic search
 
 from typing import List, Dict, Any, Optional, Tuple
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
     Distance, VectorParams, PointStruct, Filter, FieldCondition,
     Range, MatchValue, SearchRequest, SearchParams, QuantizationSearchParams,
@@ -29,7 +29,7 @@ class QdrantService:
     
     def __init__(self):
         """Initialize Qdrant client."""
-        self.client = QdrantClient(
+        self.client = AsyncQdrantClient(
             host=settings.qdrant_host,
             port=settings.qdrant_port,
             grpc_port=settings.qdrant_grpc_port if settings.qdrant_use_grpc else None,
@@ -62,7 +62,7 @@ class QdrantService:
         """Check if Qdrant is healthy."""
         try:
             # Try to get collection info
-            self.client.get_collection(self.collection_name)
+            await self.client.get_collection(self.collection_name)
             return True
         except Exception as e:
             logger.error(f"Qdrant health check failed: {e}")
@@ -72,12 +72,12 @@ class QdrantService:
         """Initialize Qdrant collection if it doesn't exist."""
         try:
             # Check if collection exists
-            collections = self.client.get_collections()
+            collections = await self.client.get_collections()
             collection_names = [c.name for c in collections.collections]
 
             if self.collection_name not in collection_names:
                 # Create collection with multiple vector sizes support
-                self.client.create_collection(
+                await self.client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config={
                         "default": VectorParams(
@@ -135,7 +135,7 @@ class QdrantService:
             ]
             
             for field in index_fields:
-                self.client.create_payload_index(
+                await self.client.create_payload_index(
                     collection_name=self.collection_name,
                     field_name=field,
                     field_schema="keyword",
@@ -183,7 +183,7 @@ class QdrantService:
                     "document_id": emb.get("document_id"),
                     "document_type": emb.get("document_type"),
                     "chunk_index": emb.get("chunk_index", 0),
-                    "created_at": emb.get("created_at", datetime.utcnow().isoformat()),
+                    "created_at": emb.get("created_at", datetime.now(timezone.utc).isoformat()),
                     "language": emb.get("language", "fa"),
                     "source": emb.get("source", "ingest"),
                     "metadata": emb.get("metadata", {}),
@@ -201,7 +201,7 @@ class QdrantService:
             batch_size = 100
             for i in range(0, len(points), batch_size):
                 batch = points[i:i + batch_size]
-                self.client.upsert(
+                await self.client.upsert(
                     collection_name=self.collection_name,
                     points=batch,
                     wait=True
@@ -220,7 +220,7 @@ class QdrantService:
         """
         try:
             qid = self._to_point_id(point_id)
-            records = self.client.retrieve(
+            records = await self.client.retrieve(
                 collection_name=self.collection_name,
                 ids=[qid],
                 with_payload=True,
@@ -289,7 +289,7 @@ class QdrantService:
             # Perform search
             search_filter = Filter(must=filter_conditions) if filter_conditions else None
             
-            results = self.client.query_points(
+            response = await self.client.query_points(
                 collection_name=self.collection_name,
                 query=query_vector,
                 using=vector_field,
@@ -297,7 +297,8 @@ class QdrantService:
                 score_threshold=score_threshold,
                 query_filter=search_filter,
                 with_payload=True,
-            ).points
+            )
+            results = response.points
             
             # Format results
             formatted_results = []
@@ -517,7 +518,7 @@ class QdrantService:
             normalized_id = self._to_point_id(point_id)
             
             # Delete the specific point
-            self.client.delete(
+            await self.client.delete(
                 collection_name=self.collection_name,
                 points_selector=PointIdsList(
                     points=[normalized_id]
@@ -544,7 +545,7 @@ class QdrantService:
         """
         try:
             # Delete points with matching document_id
-            result = self.client.delete(
+            result = await self.client.delete(
                 collection_name=self.collection_name,
                 points_selector=Filter(
                     must=[
@@ -567,7 +568,7 @@ class QdrantService:
     async def get_collection_info(self) -> Dict[str, Any]:
         """Get collection information and statistics."""
         try:
-            info = self.client.get_collection(self.collection_name)
+            info = await self.client.get_collection(self.collection_name)
             
             return {
                 "status": info.status,
@@ -587,7 +588,7 @@ class QdrantService:
     async def optimize_collection(self):
         """Optimize collection for better performance."""
         try:
-            self.client.update_collection(
+            await self.client.update_collection(
                 collection_name=self.collection_name,
                 optimizer_config=OptimizersConfigDiff(
                     indexing_threshold=10000,

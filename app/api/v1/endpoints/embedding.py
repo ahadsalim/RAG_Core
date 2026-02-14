@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 import structlog
 
 from app.services.embedding_service import get_embedding_service
+from app.services.local_embedding_service import get_local_embedding_service
 
 logger = structlog.get_logger()
 router = APIRouter()

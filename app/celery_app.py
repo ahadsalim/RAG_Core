@@ -66,11 +66,6 @@ celery_app.conf.update(
             'task': 'app.tasks.cleanup.cleanup_query_cache',
             'schedule': crontab(hour=2, minute=0),  # Every day at 2 AM
         },
-        # Process sync queue every 5 minutes
-        'process-sync-queue': {
-            'task': 'app.tasks.sync.process_sync_queue',
-            'schedule': crontab(minute='*/5'),  # Every 5 minutes
-        },
         # Send usage statistics to users system every hour
         'send-usage-stats': {
             'task': 'app.tasks.notifications.send_usage_statistics',

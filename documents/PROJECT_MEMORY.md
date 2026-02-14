@@ -88,6 +88,7 @@
 - [ ] بهبود دقت classifier برای موارد edge case
 - [ ] اضافه کردن تست‌های واحد
 - [ ] بهینه‌سازی عملکرد reranker
+- [ ] اصلاح `datetime.utcnow()` در ۱۲ فایل باقی‌مانده (۴۷ مورد) — اولویت پایین
 
 ---
 
@@ -98,6 +99,28 @@
 - Refactor کردن Classification Prompt
 - اصلاح ذخیره محتوای فایل در تاریخچه مکالمه
 - انتقال تمام prompt ها به `prompts.py`
+
+### جلسه رفع باگ‌ها — فاز ۱ (فوریه ۲۰۲۶)
+فیلدهای `tier`, `daily_query_limit`, `daily_query_count` از مدل `UserProfile` حذف شده بودند اما ارجاعات به آنها در کد باقی مانده بود.
+
+| فایل | اصلاح |
+|------|-------|
+| `app/api/v1/endpoints/admin.py` | حذف endpoint `update_user_tier`، اصلاح raw SQL با `text()`، حذف فیلدهای ناموجود |
+| `app/api/v1/endpoints/users.py` | حذف فیلدهای `tier`, `daily_query_limit`, `daily_query_count` از response |
+| `app/tasks/user.py` | حذف task `calculate_user_tier`، اصلاح `update_user_statistics` |
+| `app/tasks/__init__.py` | حذف task های ناموجود sync از `__all__` |
+| `app/api/v1/endpoints/embedding.py` | اضافه کردن import `get_local_embedding_service` |
+| `app/celery_app.py` | حذف beat schedule ناموجود `process_sync_queue` |
+
+### جلسه رفع باگ‌ها — فاز ۲: معماری (فوریه ۲۰۲۶)
+
+| تغییر | فایل‌ها | توضیح |
+|-------|---------|-------|
+| Event Loop → `asyncio.run()` | `tasks/user.py`, `tasks/cleanup.py`, `tasks/notifications.py` | رفع memory leak و سازگاری Python 3.10+ |
+| `datetime.utcnow()` → `datetime.now(timezone.utc)` | فایل‌های task + `qdrant_service.py` | رفع deprecation Python 3.12+ |
+| `QdrantClient` → `AsyncQdrantClient` | `app/services/qdrant_service.py` | رفع blocking I/O در FastAPI event loop |
+
+**نکته مهم:** تمام تغییرات فقط پیاده‌سازی داخلی Core را تغییر دادند. هیچ API endpoint URL یا response format تغییر نکرد. سیستم‌های Ingest و Users تحت تأثیر قرار نگرفتند.
 
 ---
 ---

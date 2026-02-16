@@ -324,6 +324,34 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
     if [ -n "$S3_SECRET_INPUT" ]; then
         sed -i "s#S3_SECRET_ACCESS_KEY="minioadmin"#S3_SECRET_ACCESS_KEY="$S3_SECRET_INPUT"#g" "$PROJECT_ROOT/.env"
     fi
+    
+    # --- Ask for Reranker Server ---
+    echo ""
+    print_section "Reranker Service Configuration"
+    echo -e "${YELLOW}Enter the IP address or hostname of your dedicated Reranker server${NC}"
+    read -p "Reranker Server [10.10.10.60]: " RERANKER_HOST_INPUT
+    if [ -z "$RERANKER_HOST_INPUT" ]; then
+        RERANKER_HOST_INPUT="10.10.10.60"
+    fi
+    
+    read -p "Reranker Port [8100]: " RERANKER_PORT_INPUT
+    if [ -z "$RERANKER_PORT_INPUT" ]; then
+        RERANKER_PORT_INPUT="8100"
+    fi
+    
+    # Update RERANKER_SERVICE_URL in .env
+    RERANKER_URL="http://${RERANKER_HOST_INPUT}:${RERANKER_PORT_INPUT}"
+    sed -i "s#RERANKER_SERVICE_URL=\"http://localhost:8100\"#RERANKER_SERVICE_URL=\"$RERANKER_URL\"#g" "$PROJECT_ROOT/.env"
+    
+    # Test reranker connection
+    echo -n "Testing connection to reranker server... "
+    if curl -sf "${RERANKER_URL}/health" > /dev/null 2>&1; then
+        print_success "Reranker server is reachable!"
+    else
+        print_warning "Could not reach reranker server at ${RERANKER_URL}"
+        print_warning "Make sure the reranker service is running before starting Core API"
+    fi
+    
     print_success ".env file created with secure passwords"
 else
     print_success ".env file already exists"

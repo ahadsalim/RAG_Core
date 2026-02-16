@@ -68,8 +68,18 @@ for config in "${CONFIGS[@]}"; do
     sudo docker compose restart core-api > /dev/null 2>&1
     
     # صبر برای آماده شدن service
-    echo -e "${YELLOW}⏳ صبر برای آماده شدن service (10 ثانیه)...${NC}"
-    sleep 10
+    echo -e "${YELLOW}⏳ صبر برای آماده شدن service...${NC}"
+    sleep 15
+    
+    # بررسی health check
+    for i in {1..10}; do
+        if sudo docker compose exec -T core-api curl -s http://localhost:7001/health > /dev/null 2>&1; then
+            echo -e "${GREEN}✅ Service آماده است${NC}"
+            break
+        fi
+        echo -e "${YELLOW}   تلاش $i/10...${NC}"
+        sleep 3
+    done
     
     # اجرای تست
     echo -e "${GREEN}🚀 اجرای تست...${NC}"

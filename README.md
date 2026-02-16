@@ -102,10 +102,13 @@ core/
 │
 ├── document/                # 📚 مستندات
 │
-├── scripts/                 # 🔧 ابزارها
-│   ├── init_db.py
+├── tools/                   # 🔧 ابزارهای نگهداری و مدیریت
 │   ├── check_qdrant_data.py
-│   └── reset_qdrant_collection.py
+│   ├── cleanup_orphan_conversations.py
+│   ├── monitor_sync.sh
+│   ├── reset_qdrant_collection.py
+│   ├── verify_after_sync.py
+│   └── verify_e5_large_migration.py
 │
 ├── test/                    # 🧪 تست‌ها
 │

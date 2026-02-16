@@ -19,6 +19,7 @@ deployment/
 ├── backup_auto.sh         # بکآپ خودکار (هر 6 ساعت)
 ├── backup_manual.sh       # بکآپ دستی و Restore
 ├── manage.sh              # مدیریت (validate, API keys, secrets)
+├── init_db.py             # راه‌اندازی اولیه دیتابیس
 ├── requirements.txt       # وابستگی‌های Python
 ├── .env.example           # نمونه تنظیمات
 └── docker/

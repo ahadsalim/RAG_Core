@@ -50,5 +50,5 @@ done
 
 echo ""
 echo "Run this to verify:"
-echo "  docker exec core-api python scripts/detailed_sync_report.py"
+echo "  docker exec core-api python tools/verify_after_sync.py"
 echo ""

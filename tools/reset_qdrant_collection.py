@@ -9,9 +9,9 @@ Use this when:
 - Troubleshooting Qdrant issues
 
 Usage:
-    python scripts/reset_qdrant_collection.py           # Interactive mode
-    python scripts/reset_qdrant_collection.py --force   # Non-interactive (use with caution)
-    python scripts/reset_qdrant_collection.py --info    # Show collection info only
+    python tools/reset_qdrant_collection.py           # Interactive mode
+    python tools/reset_qdrant_collection.py --force   # Non-interactive (use with caution)
+    python tools/reset_qdrant_collection.py --info    # Show collection info only
 
 IMPORTANT: This will delete ALL vectors in Qdrant!
 Make sure the ingest system is ready to re-sync all data.

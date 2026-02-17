@@ -156,27 +156,6 @@ services:
       - core-network
     restart: unless-stopped
 
-  # Nginx Proxy Manager
-  nginx-proxy-manager:
-    image: jc21/nginx-proxy-manager:latest
-    container_name: nginx-proxy-manager
-    restart: unless-stopped
-    ports:
-      - "80:80"     # HTTP
-      - "443:443"   # HTTPS
-      - "81:81"     # Admin UI
-    environment:
-      - DB_SQLITE_FILE=/data/database.sqlite
-    volumes:
-      - ../../data/nginx-proxy-manager/data:/data
-      - ../../data/nginx-proxy-manager/letsencrypt:/etc/letsencrypt
-    networks:
-      - core-network
-    healthcheck:
-      test: ["CMD", "/bin/check-health"]
-      interval: 10s
-      timeout: 3s
-
   # cAdvisor for Container Monitoring
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.47.0

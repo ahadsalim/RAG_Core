@@ -3,7 +3,7 @@
 # ==============================================================================
 # Core RAG System - Automatic Backup Script
 # Version: 2.0.0
-# Description: Automatic backup every 6 hours - PostgreSQL + Redis + NPM + Config
+# Description: Automatic backup every 6 hours - PostgreSQL + Redis + Qdrant + Config
 # Transfers to remote backup server via rsync
 # ==============================================================================
 
@@ -144,35 +144,7 @@ run_backup() {
     fi
     
     # ============================================
-    # 3. Nginx Proxy Manager Data Backup
-    # ============================================
-    print_info "Backing up Nginx Proxy Manager data..."
-    
-    # Try to find NPM data volume or directory
-    NPM_DATA_PATH="/srv/data/nginx-proxy-manager"
-    
-    if [ -d "$NPM_DATA_PATH" ] && [ "$(ls -A $NPM_DATA_PATH 2>/dev/null)" ]; then
-        # Backup from local directory
-        if tar czf "${BACKUP_DIR}/${BACKUP_NAME}_npm_data.tar.gz" -C "$NPM_DATA_PATH" . 2>/dev/null; then
-            print_success "NPM data backup completed (from directory)"
-        else
-            print_info "NPM data backup failed"
-        fi
-    else
-        # Try Docker volume
-        if docker run --rm \
-            -v npm_data:/data \
-            -v "${BACKUP_DIR}:/backup" \
-            alpine \
-            tar czf "/backup/${BACKUP_NAME}_npm_data.tar.gz" -C /data . 2>/dev/null; then
-            print_success "NPM data backup completed (from volume)"
-        else
-            print_info "NPM data backup skipped (volume/directory not found)"
-        fi
-    fi
-    
-    # ============================================
-    # 4. Qdrant Vector Database Backup
+    # 3. Qdrant Vector Database Backup
     # ============================================
     print_info "Backing up Qdrant vector data..."
     
@@ -191,7 +163,7 @@ run_backup() {
     fi
     
     # ============================================
-    # 5. Backup .env file
+    # 4. Backup .env file
     # ============================================
     print_info "Backing up .env configuration..."
     

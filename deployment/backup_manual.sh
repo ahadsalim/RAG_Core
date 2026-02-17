@@ -154,28 +154,15 @@ backup_full() {
         print_warning "Redis backup skipped (no data or container not found)"
     fi
     
-    # 5. Backup NPM data
-    print_info "[5/7] Backing up Nginx Proxy Manager data..."
-    NPM_DATA_PATH="/srv/data/nginx-proxy-manager"
-    if [ -d "$NPM_DATA_PATH" ] && [ "$(ls -A $NPM_DATA_PATH 2>/dev/null)" ]; then
-        if tar czf "$temp_dir/npm_data.tar.gz" -C "$NPM_DATA_PATH" . 2>/dev/null; then
-            print_success "NPM data backed up ($(du -h "$temp_dir/npm_data.tar.gz" | cut -f1))"
-        else
-            print_warning "NPM data backup failed"
-        fi
-    else
-        print_warning "NPM data not found, skipping"
-    fi
-    
-    # 6. Backup alembic version info
-    print_info "[6/7] Backing up migration info..."
+    # 5. Backup alembic version info
+    print_info "[5/6] Backing up migration info..."
     if [ -d "$PROJECT_ROOT/alembic/versions" ]; then
         docker-compose -f "$COMPOSE_FILE" exec -T core-api alembic current > "$temp_dir/alembic_version.txt" 2>/dev/null || true
         print_success "Migration info backed up"
     fi
     
-    # 7. Create metadata
-    print_info "[7/7] Creating backup metadata..."
+    # 6. Create metadata
+    print_info "[6/6] Creating backup metadata..."
     cat > "$temp_dir/backup_info.json" <<EOF
 {
     "type": "full",
@@ -186,7 +173,7 @@ backup_full() {
     "db_user": "${POSTGRES_USER:-core_user}",
     "hostname": "$(hostname)",
     "version": "2.0.0",
-    "components": ["database", "config", "qdrant", "redis", "npm", "alembic_info"]
+    "components": ["database", "config", "qdrant", "redis", "alembic_info"]
 }
 EOF
     print_success "Metadata created"
@@ -319,7 +306,7 @@ restore_full() {
     print_success "Services stopped"
     
     # Restore database - handle both formats
-    print_info "[3/7] Restoring database..."
+    print_info "[3/6] Restoring database..."
     docker-compose -f "$COMPOSE_FILE" up -d postgres-core
     sleep 5
     
@@ -356,7 +343,7 @@ restore_full() {
     fi
     
     # Restore .env - handle both formats
-    print_info "[4/7] Restoring configuration..."
+    print_info "[4/6] Restoring configuration..."
     local env_file=""
     if [ -f "$temp_dir/.env" ]; then
         env_file="$temp_dir/.env"
@@ -377,7 +364,7 @@ restore_full() {
     fi
     
     # Restore Qdrant data - handle both formats
-    print_info "[5/7] Restoring Qdrant data..."
+    print_info "[5/6] Restoring Qdrant data..."
     local qdrant_file=""
     if [ -f "$temp_dir/qdrant_data.tar.gz" ]; then
         qdrant_file="$temp_dir/qdrant_data.tar.gz"
@@ -397,7 +384,7 @@ restore_full() {
     fi
     
     # Restore Redis data - handle both formats
-    print_info "[6/7] Restoring Redis data..."
+    print_info "[6/6] Restoring Redis data..."
     local redis_file=""
     if [ -f "$temp_dir/redis.rdb" ]; then
         redis_file="$temp_dir/redis.rdb"
@@ -415,25 +402,6 @@ restore_full() {
         print_success "Redis data restored"
     else
         print_warning "No Redis data found in backup"
-    fi
-    
-    # Restore NPM data - handle both formats
-    print_info "[7/7] Restoring Nginx Proxy Manager data..."
-    local npm_file=""
-    if [ -f "$temp_dir/npm_data.tar.gz" ]; then
-        npm_file="$temp_dir/npm_data.tar.gz"
-    elif ls "$temp_dir"/*_npm_data.tar.gz 2>/dev/null | head -1 > /dev/null; then
-        npm_file=$(ls "$temp_dir"/*_npm_data.tar.gz 2>/dev/null | head -1)
-    fi
-    
-    if [ -n "$npm_file" ] && [ -f "$npm_file" ]; then
-        NPM_DATA_PATH="/srv/data/nginx-proxy-manager"
-        mkdir -p "$NPM_DATA_PATH"
-        tar xzf "$npm_file" -C "$NPM_DATA_PATH" 2>/dev/null || \
-            print_warning "NPM restore had issues"
-        print_success "NPM data restored"
-    else
-        print_warning "No NPM data found in backup"
     fi
     
     # Cleanup
@@ -686,12 +654,6 @@ verify_backup() {
                 print_success "Redis data present"
             else
                 print_warning "Redis data missing"
-            fi
-            
-            if grep -q "npm_data\|_npm" "$temp_dir/contents.txt"; then
-                print_success "NPM data present"
-            else
-                print_warning "NPM data missing"
             fi
             
             if grep -q "backup_info" "$temp_dir/contents.txt"; then

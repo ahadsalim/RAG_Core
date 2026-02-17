@@ -94,9 +94,8 @@ Examples:
   $0 --skip-build    # Start without rebuilding
 
 Post-Installation:
-  - Nginx Proxy Manager will be available at: http://localhost:81
-  - Default NPM credentials: admin@example.com / changeme
-  - Use NPM to configure SSL certificates for production
+  - API will be available at: http://localhost:7001
+  - Check documentation for SSL setup if needed
 
 EOF
     exit 0
@@ -175,17 +174,13 @@ print_success "All prerequisites satisfied"
 print_section "Step 2: Creating Required Directories"
 
 # Create data directories
-mkdir -p "$DATA_DIR/nginx-proxy-manager/data"
-mkdir -p "$DATA_DIR/nginx-proxy-manager/letsencrypt"
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$LOG_DIR"
 
 # Set permissions
-chmod -R 755 "$DATA_DIR" 2>/dev/null || true
 chmod -R 700 "$BACKUP_DIR" 2>/dev/null || true
 
 print_success "Directories created:"
-echo "    - $DATA_DIR/nginx-proxy-manager/"
 echo "    - $BACKUP_DIR/"
 echo "    - $LOG_DIR/"
 
@@ -583,7 +578,6 @@ echo ""
 echo -e "  ${YELLOW}▶ API Documentation:${NC}       http://localhost:7001/docs"
 echo -e "  ${YELLOW}▶ Health Check:${NC}            http://localhost:7001/health"
 echo -e "  ${YELLOW}▶ Flower (Celery Monitor):${NC} http://localhost:5555"
-echo -e "  ${YELLOW}▶ Nginx Proxy Manager:${NC}     http://localhost:81"
 echo -e "  ${YELLOW}▶ Qdrant Dashboard:${NC}        http://localhost:7333/dashboard"
 echo ""
 
@@ -606,25 +600,6 @@ if [ "$GENERATED_PASSWORDS" = "NEW_INSTALLATION" ]; then
     echo -e "    Password: $FLOWER_PASS"
     echo ""
 fi
-
-echo -e "${CYAN}==============================================================${NC}"
-echo -e "${CYAN}               NGINX PROXY MANAGER SETUP                     ${NC}"
-echo -e "${CYAN}==============================================================${NC}"
-echo ""
-echo -e "  ${YELLOW}1. Open:${NC} http://localhost:81"
-echo -e "  ${YELLOW}2. Default Login:${NC}"
-echo -e "     Email:    admin@example.com"
-echo -e "     Password: changeme"
-echo ""
-echo -e "  ${YELLOW}3. SSL Setup for Production:${NC}"
-echo -e "     - Go to 'Hosts' > 'Proxy Hosts' > 'Add Proxy Host'"
-echo -e "     - Domain: $DOMAIN"
-echo -e "     - Forward Hostname: core-api"
-echo -e "     - Forward Port: 7001"
-echo -e "     - Enable 'Block Common Exploits'"
-echo -e "     - In SSL tab, enable 'Force SSL' and 'HTTP/2 Support'"
-echo -e "     - Request Let's Encrypt certificate"
-echo ""
 
 echo -e "${CYAN}==============================================================${NC}"
 echo -e "${CYAN}             USERS SYSTEM INTEGRATION                        ${NC}"

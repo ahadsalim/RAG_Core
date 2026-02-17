@@ -187,6 +187,59 @@ services:
       - '--docker_only=true'
       - '--store_container_labels=false'
 
+  # Node Exporter - System metrics for Prometheus
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+
+  # PostgreSQL Exporter - Database metrics for Prometheus
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:7433/${POSTGRES_DB}?sslmode=disable"
+    command:
+      - '--collector.stat_statements'
+      - '--collector.database'
+      - '--collector.locks'
+
+  # Redis Exporter - Cache metrics for Prometheus
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: redis-exporter
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      REDIS_ADDR: "localhost:7379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+
+  # Promtail - Log collector for Loki
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./promtail-config.yml:/etc/promtail/config.yml:ro
+    command:
+      - '-config.file=/etc/promtail/config.yml'
+
 volumes:
   postgres-core-data:
   redis-core-data:

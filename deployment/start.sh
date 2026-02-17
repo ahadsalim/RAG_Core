@@ -418,13 +418,6 @@ else
     print_info "Starting services..."
     docker-compose -f "$SCRIPT_DIR/docker/docker-compose.yml" up -d
     
-    # Start monitoring exporters
-    if [ -f "$SCRIPT_DIR/monitoring.yml" ]; then
-        print_info "Starting monitoring exporters..."
-        docker-compose -f "$SCRIPT_DIR/monitoring.yml" up -d
-        print_success "Monitoring exporters started"
-    fi
-    
     # Wait for services with progress indicator
     print_info "Waiting for services to be ready..."
     echo -n "    "
@@ -618,6 +611,34 @@ echo -e "  ${GREEN}$JWT_SECRET${NC}"
 echo ""
 echo -e "  ${RED}[!] Copy this EXACT value to Users System .env file${NC}"
 echo -e "  ${RED}[!] Both systems MUST use the same JWT_SECRET_KEY${NC}"
+echo ""
+
+echo -e "${CYAN}==============================================================${NC}"
+echo -e "${CYAN}              MONITORING SYSTEM (PROMETHEUS/LOKI)            ${NC}"
+echo -e "${CYAN}==============================================================${NC}"
+echo ""
+echo -e "  ${GREEN}${BOLD}Exporters installed for monitoring:${NC}"
+echo ""
+echo -e "  ${YELLOW}▶ Node Exporter:${NC}          http://10.10.10.20:9100/metrics"
+echo -e "    System metrics (CPU, Memory, Disk, Network)"
+echo ""
+echo -e "  ${YELLOW}▶ PostgreSQL Exporter:${NC}    http://10.10.10.20:9187/metrics"
+echo -e "    Database metrics for core_db"
+echo ""
+echo -e "  ${YELLOW}▶ Redis Exporter:${NC}         http://10.10.10.20:9121/metrics"
+echo -e "    Cache metrics for Redis"
+echo ""
+echo -e "  ${YELLOW}▶ Promtail:${NC}               Shipping logs to Loki (10.10.10.40:3100)"
+echo -e "    All container logs with label: server=core"
+echo ""
+echo -e "  ${YELLOW}▶ cAdvisor:${NC}               http://localhost:8080/metrics"
+echo -e "    Container metrics (localhost only)"
+echo ""
+echo -e "  ${YELLOW}▶ Qdrant:${NC}                 http://localhost:7333/metrics"
+echo -e "    Vector database metrics (localhost only)"
+echo ""
+echo -e "  ${BLUE}[ℹ]${NC} Exporters accessible from LAN (192.168.100.0/24) and DMZ (10.10.10.0/24)"
+echo -e "  ${BLUE}[ℹ]${NC} Add these targets to your Prometheus configuration"
 echo ""
 
 echo -e "${CYAN}==============================================================${NC}"

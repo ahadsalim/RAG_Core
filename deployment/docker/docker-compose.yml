@@ -6,7 +6,7 @@ services:
       dockerfile: deployment/docker/Dockerfile
     container_name: core-api
     ports:
-      - "7001:7001"
+      - "127.0.0.1:7001:7001"
     env_file:
       - ../../.env
     depends_on:
@@ -42,7 +42,7 @@ services:
       - postgres-core-data:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "7433:5432"  # Changed to 7000 series to avoid any conflicts
+      - "127.0.0.1:7433:5432"  # Changed to 7000 series to avoid any conflicts
     networks:
       - core-network
     healthcheck:
@@ -58,14 +58,22 @@ services:
     image: redis:7-alpine
     container_name: redis-core
     ports:
-      - "7379:6379"  # Changed to 7000 series to avoid any conflicts
+      - "127.0.0.1:7379:6379"  # Changed to 7000 series to avoid any conflicts
     volumes:
       - redis-core-data:/data
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    command: >
+      redis-server
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD}
+      --protected-mode yes
+      --rename-command SLAVEOF ""
+      --rename-command REPLICAOF ""
+      --rename-command DEBUG ""
+      --rename-command CONFIG ""
     networks:
       - core-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -77,8 +85,8 @@ services:
     image: qdrant/qdrant:latest
     container_name: qdrant
     ports:
-      - "7333:6333"
-      - "7334:6334"
+      - "127.0.0.1:7333:6333"
+      - "127.0.0.1:7334:6334"
     volumes:
       - qdrant-data:/qdrant/storage
     environment:
@@ -143,7 +151,7 @@ services:
     image: mher/flower:2.0.1
     container_name: flower
     ports:
-      - "5555:5555"
+      - "127.0.0.1:5555:5555"
     env_file:
       - ../../.env
     environment:
@@ -162,7 +170,7 @@ services:
     container_name: cadvisor
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro

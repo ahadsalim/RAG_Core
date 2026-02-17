@@ -41,8 +41,8 @@ http://localhost:7001/health
 # Celery Monitoring (Flower)
 http://localhost:5555
 
-# Nginx Proxy Manager
-http://localhost:81
+# Qdrant Dashboard
+http://localhost:7333/dashboard
 ```
 
 ### مدیریت سرویس‌ها
@@ -75,11 +75,6 @@ docker-compose restart
 └──────┬──────┘
        │
        ▼
-┌─────────────────────────────────────┐
-│     Nginx Proxy Manager (SSL)       │
-└──────────────┬──────────────────────┘
-               │
-               ▼
 ┌──────────────────────────────────────┐
 │          Core API (FastAPI)          │
 │  ┌────────────────────────────────┐  │

@@ -184,7 +184,6 @@ run_backup() {
     BACKUP_FILES=""
     [ -f "${BACKUP_NAME}_postgres.dump" ] && BACKUP_FILES="$BACKUP_FILES ${BACKUP_NAME}_postgres.dump"
     [ -f "${BACKUP_NAME}_redis.rdb" ] && BACKUP_FILES="$BACKUP_FILES ${BACKUP_NAME}_redis.rdb"
-    [ -f "${BACKUP_NAME}_npm_data.tar.gz" ] && BACKUP_FILES="$BACKUP_FILES ${BACKUP_NAME}_npm_data.tar.gz"
     [ -f "${BACKUP_NAME}_qdrant.tar.gz" ] && BACKUP_FILES="$BACKUP_FILES ${BACKUP_NAME}_qdrant.tar.gz"
     [ -f "${BACKUP_NAME}_env" ] && BACKUP_FILES="$BACKUP_FILES ${BACKUP_NAME}_env"
     

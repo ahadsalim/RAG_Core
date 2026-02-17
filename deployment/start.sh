@@ -418,6 +418,13 @@ else
     print_info "Starting services..."
     docker-compose -f "$SCRIPT_DIR/docker/docker-compose.yml" up -d
     
+    # Start monitoring exporters
+    if [ -f "$SCRIPT_DIR/monitoring.yml" ]; then
+        print_info "Starting monitoring exporters..."
+        docker-compose -f "$SCRIPT_DIR/monitoring.yml" up -d
+        print_success "Monitoring exporters started"
+    fi
+    
     # Wait for services with progress indicator
     print_info "Waiting for services to be ready..."
     echo -n "    "

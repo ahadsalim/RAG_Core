@@ -45,12 +45,19 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy application code
 COPY . .
 
+# Copy and set entrypoint script
+COPY deployment/docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
 # Expose port
 EXPOSE 7001
+
+# Set entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
 
 # Default command (can be overridden in docker-compose)
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7001"]

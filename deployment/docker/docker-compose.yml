@@ -32,7 +32,7 @@ services:
 
   # PostgreSQL for Core
   postgres-core:
-    image: postgres:15-alpine
+    image: 10.10.10.111:5001/library/postgres:15-alpine
     container_name: postgres-core
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
@@ -55,7 +55,7 @@ services:
 
   # Redis for Core
   redis-core:
-    image: redis:7-alpine
+    image: 10.10.10.111:5001/library/redis:7-alpine
     container_name: redis-core
     ports:
       - "127.0.0.1:7379:6379"  # Changed to 7000 series to avoid any conflicts
@@ -82,7 +82,7 @@ services:
 
   # Qdrant Vector Database
   qdrant:
-    image: qdrant/qdrant:latest
+    image: 10.10.10.111:5001/qdrant/qdrant:latest
     container_name: qdrant
     ports:
       - "0.0.0.0:7333:6333"
@@ -148,7 +148,7 @@ services:
 
   # Flower (Celery Monitoring)
   flower:
-    image: mher/flower:2.0.1
+    image: 10.10.10.111:5001/mher/flower:2.0.1
     container_name: flower
     ports:
       - "127.0.0.1:5555:5555"
@@ -166,7 +166,7 @@ services:
 
   # cAdvisor for Container Monitoring
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    image: 10.10.10.111:5001/zcube/cadvisor:latest
     container_name: cadvisor
     restart: unless-stopped
     ports:
@@ -189,7 +189,7 @@ services:
 
   # Node Exporter - System metrics for Prometheus
   node-exporter:
-    image: prom/node-exporter:latest
+    image: 10.10.10.111:5003/prometheus/node-exporter:latest
     container_name: node-exporter
     restart: unless-stopped
     network_mode: host
@@ -206,7 +206,7 @@ services:
 
   # PostgreSQL Exporter - Database metrics for Prometheus
   postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:latest
+    image: 10.10.10.111:5003/prometheuscommunity/postgres-exporter:latest
     container_name: postgres-exporter
     restart: unless-stopped
     network_mode: host
@@ -219,7 +219,7 @@ services:
 
   # Redis Exporter - Cache metrics for Prometheus
   redis-exporter:
-    image: oliver006/redis_exporter:latest
+    image: 10.10.10.111:5001/oliver006/redis_exporter:latest
     container_name: redis-exporter
     restart: unless-stopped
     network_mode: host
@@ -229,7 +229,7 @@ services:
 
   # Promtail - Log collector for Loki
   promtail:
-    image: grafana/promtail:latest
+    image: 10.10.10.111:5001/grafana/promtail:latest
     container_name: promtail
     restart: unless-stopped
     network_mode: host

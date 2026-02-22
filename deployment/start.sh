@@ -157,6 +157,34 @@ else
     print_success "Docker Compose installed (v$COMPOSE_VERSION)"
 fi
 
+# ============================================================================
+# Step 1.5: Check Cache Server Connectivity
+# ============================================================================
+print_section "Step 1.5: Checking Cache Server Connectivity"
+
+CACHE_SERVER="10.10.10.111"
+
+# Check Docker registry (port 5001)
+if timeout 3 bash -c "cat < /dev/null > /dev/tcp/$CACHE_SERVER/5001" 2>/dev/null; then
+    print_success "Docker registry cache accessible (port 5001)"
+else
+    print_warning "Docker registry cache not accessible (port 5001) - will try to pull from internet"
+fi
+
+# Check PyPI devpi (port 3141)
+if timeout 3 bash -c "cat < /dev/null > /dev/tcp/$CACHE_SERVER/3141" 2>/dev/null; then
+    print_success "PyPI cache (devpi) accessible (port 3141)"
+else
+    print_warning "PyPI cache not accessible (port 3141) - will try to install from internet"
+fi
+
+# Check offline packages nginx (port 80)
+if curl -sf -m 3 http://$CACHE_SERVER/pypi-offline/ > /dev/null 2>&1; then
+    print_success "Offline packages (nginx) accessible - sentence-transformers 5.2.3 available"
+else
+    print_warning "Offline packages not accessible - sentence-transformers may fail to install"
+fi
+
 if ! command_exists openssl; then
     print_error "OpenSSL is required but not installed"
     exit 1

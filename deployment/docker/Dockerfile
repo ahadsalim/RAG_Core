@@ -9,8 +9,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     POETRY_NO_INTERACTION=1
 
 # Install system dependencies
+# Note: Using internet for apt packages since apt-cacher-ng (10.10.10.111:3142) is not accessible from Docker build
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    --network=host \
     apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -34,10 +36,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     --trusted-host 10.10.10.111
 
 # Stage 1: Download sentence-transformers offline packages from nginx
-RUN apt-get update && apt-get install -y wget && \
+RUN --network=host \
+    apt-get update && apt-get install -y wget && \
     mkdir -p /tmp/pypi-offline && \
-    wget -q -r -np -nH --cut-dirs=1 -R "index.html*" \
-    http://10.10.10.111/pypi-offline/ -P /tmp/ && \
+    cd /tmp/pypi-offline && \
+    wget -q -r -np -nH --cut-dirs=1 -A "*.whl" -R "index.html*" \
+    http://10.10.10.111/pypi-offline/ && \
     apt-get remove -y wget && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 # Stage 2: Core dependencies (numpy first to avoid conflicts)

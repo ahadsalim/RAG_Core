@@ -18,6 +18,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     g++ \
     postgresql-client \
     curl \
+    wget \
     tesseract-ocr \
     tesseract-ocr-fas \
     tesseract-ocr-eng \
@@ -36,13 +37,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     --trusted-host 10.10.10.111
 
 # Stage 1: Download sentence-transformers offline packages from nginx
-RUN --network=host \
-    apt-get update && apt-get install -y wget && \
-    mkdir -p /tmp/pypi-offline && \
+RUN mkdir -p /tmp/pypi-offline && \
     cd /tmp/pypi-offline && \
     wget -q -r -np -nH --cut-dirs=1 -A "*.whl" -R "index.html*" \
-    http://10.10.10.111/pypi-offline/ && \
-    apt-get remove -y wget && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+    http://10.10.10.111/pypi-offline/
 
 # Stage 2: Core dependencies (numpy first to avoid conflicts)
 RUN --mount=type=cache,target=/root/.cache/pip \

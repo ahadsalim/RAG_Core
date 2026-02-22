@@ -19,7 +19,8 @@ CACHE_SERVER = 10.10.10.111
 | k8s mirror | `:5005` | images از `registry.k8s.io` |
 | PyPI (devpi) | `:3141` | Python packages |
 | npm (verdaccio) | `:4873` | Node.js packages |
-| apt cache | `:3142` | Ubuntu/Debian apt packages |
+| apt cache (HTTP) | `:3142` | Ubuntu/Debian apt packages (فقط HTTP) |
+| apt cache (HTTPS) | `:3144` | Ubuntu/Debian apt packages (HTTP + HTTPS tunneling) |
 | apk cache | `:3143` | Alpine Linux apk packages |
 | GPG keys / status | `:80` | کلیدها و وضعیت |
 
@@ -29,11 +30,18 @@ CACHE_SERVER = 10.10.10.111
 
 ```bash
 # هدایت apt به cache سرور
+# پورت 3142: فقط HTTP repositories (Ubuntu base)
+# پورت 3144: HTTP + HTTPS tunneling (Docker repository)
 echo 'Acquire::http::Proxy "http://10.10.10.111:3142";' | sudo tee /etc/apt/apt.conf.d/00proxy
+echo 'Acquire::https::Proxy "http://10.10.10.111:3144";' | sudo tee -a /etc/apt/apt.conf.d/00proxy
 
 # تست
 sudo apt-get update
 ```
+
+**توضیح پورت‌ها:**
+- **پورت 3142** (از طریق nginx): فقط برای HTTP repositories مثل Ubuntu base packages
+- **پورت 3144** (مستقیم apt-cacher-ng): برای HTTPS repositories مثل Docker - پشتیبانی از CONNECT tunneling
 
 ### برای Alpine Linux containers:
 
@@ -71,7 +79,8 @@ curl -fsSL http://10.10.10.111/keys/docker.gpg | sudo gpg --dearmor -o /etc/apt/
 sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
 # Docker repo — از طریق apt-cacher-ng
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu noble stable" | \
+# توجه: Docker repository از HTTPS استفاده می‌کند
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
   sudo tee /etc/apt/sources.list.d/docker.list
 
 # نصب
@@ -80,6 +89,8 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plu
 sudo systemctl enable --now docker
 sudo usermod -aG docker $USER
 ```
+
+**نکته مهم:** Docker repository از HTTPS استفاده می‌کند. پورت 3144 از CONNECT tunneling پشتیبانی می‌کند و این مشکل را حل می‌کند.
 
 ---
 
@@ -221,7 +232,7 @@ wget -r -np -nH --cut-dirs=1 -R "index.html*" http://10.10.10.111/pypi-offline/
 
 **مرحله 2: نصب از فایل‌های local**
 ```bash
-pip install sentence-transformers==2.3.1 \
+pip install sentence-transformers==5.2.3 \
   --no-index \
   --find-links ~/offline-packages/pypi-offline/
 ```
@@ -238,12 +249,12 @@ COPY offline-packages/pypi-offline /tmp/pypi-offline
 RUN pip install --no-cache-dir \
     --no-index \
     --find-links /tmp/pypi-offline/ \
-    sentence-transformers==2.3.1
+    sentence-transformers==5.2.3
 ```
 
 **لیست packages آفلاین موجود:**
-- `sentence-transformers==2.3.1` + همه dependencies (47 package، ~4GB)
-- شامل: `torch`, `transformers`, `numpy`, `scipy`, `scikit-learn`, `Pillow`, `nltk` و تمام CUDA packages
+- `sentence-transformers==5.2.3` + همه dependencies (66 packages، ~4GB)
+- شامل: `torch==2.10.0`, `transformers==5.2.0`, `numpy`, `scipy`, `scikit-learn`, `Pillow`, `nltk` و تمام CUDA packages
 - دانلود: `http://10.10.10.111/pypi-offline/`
 
 ---
@@ -464,7 +475,7 @@ pip install <package> \
 - boto3==1.34.162, botocore==1.34.162, django-storages==1.14.2
 - jdatetime>=4.1.1, django-cors-headers==4.3.1
 - prometheus-client==0.20.0
-- transformers>=4.30.0, sentence-transformers==2.3.1
+- transformers>=4.30.0, sentence-transformers>=2.3.1
 - huggingface_hub>=0.23.0, hazm>=0.7.0
 - python-docx>=1.0.0, beautifulsoup4>=4.12.0
 - scikit-learn>=1.3.0, scipy>=1.11.0, numpy>=1.24.0
@@ -474,7 +485,7 @@ pip install <package> \
 
 **RAG-Reranker:**
 - fastapi==0.109.0, uvicorn[standard]==0.27.0
-- sentence-transformers==2.3.1, pydantic==2.5.3
+- sentence-transformers>=2.3.1, pydantic==2.5.3
 
 **RAG-Users:**
 - Django==4.2.7, djangorestframework-simplejwt==5.3.0
@@ -541,7 +552,7 @@ sudo bash /srv/deployment/cache-manager.sh add-offline "torch>=2.0.0 tensorflow>
 **URL:** `http://10.10.10.111/models/`
 
 **مدل‌های موجود:**
-- `intfloat-multilingual-e5-large` (~2.24GB) — Multilingual embedding model
+- `intfloat-multilingual-e5-large` (~2.2GB) — Multilingual embedding model (ONNX format)
 
 ### نحوه دانلود و استفاده
 
@@ -693,3 +704,120 @@ sudo bash /srv/deployment/cache-manager.sh
 2. **دائمی:** به تیم cache اطلاع دهید تا به لیست warm-up اضافه شود
 
 **تماس با مدیر سرور کش:** `ahad@10.10.10.111`
+
+---
+
+# 🔄 استراتژی بروزرسانی سیستم عامل
+
+## هدف
+
+سرور کش باید خودش را بروز نگه دارد تا بتواند آپدیت‌های سیستم عامل را به سرورهای client ارائه دهد.
+
+---
+
+## استراتژی بروزرسانی سرور کش (10.10.10.111)
+
+سرور کش **مستقیماً** به اینترنت متصل است و از apt-cacher-ng خودش استفاده **نمی‌کند**.
+
+### گزینه 1: Unattended Upgrades (توصیه شده)
+
+```bash
+# نصب
+sudo apt-get install -y unattended-upgrades apt-listchanges
+
+# پیکربندی: /etc/apt/apt.conf.d/50unattended-upgrades
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}";
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}:${distro_codename}-updates";
+};
+
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+Unattended-Upgrade::MinimalSteps "true";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::Automatic-Reboot-Time "03:00";
+
+# فعال‌سازی: /etc/apt/apt.conf.d/20auto-upgrades
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+APT::Periodic::Unattended-Upgrade "1";
+```
+
+**مزایا:**
+- ✅ بروزرسانی امن و تست شده
+- ✅ فقط security updates نصب می‌شود (یا همه updates)
+- ✅ لاگ کامل
+- ✅ می‌تواند خودکار restart کند (اختیاری)
+
+### گزینه 2: Cron Job برای بروزرسانی هفتگی
+
+```bash
+# /etc/cron.d/cache-server-update
+# هر جمعه ساعت 20:00 UTC (یک ساعت قبل از warm-up)
+0 20 * * 5 root apt-get update && apt-get dist-upgrade -y && apt-get autoremove -y && apt-get autoclean >> /var/log/cache-server-update.log 2>&1
+```
+
+---
+
+## کش کردن آپدیت‌ها برای Client Servers
+
+بعد از اینکه سرور کش خودش را آپدیت کرد، packages جدید در apt-cacher-ng کش می‌شوند.
+
+**مکانیزم:**
+1. سرور کش `apt-get update && apt-get dist-upgrade` را اجرا می‌کند
+2. apt-cacher-ng packages جدید را از Ubuntu mirrors دانلود و کش می‌کند
+3. Client servers می‌توانند همین packages را از cache دریافت کنند
+
+---
+
+## Cron پیشنهادی برای سرور کش
+
+```bash
+# /etc/cron.d/rag-cache-warmup
+# System updates (download only, no install)
+0 20 * * 5 root apt-get update && apt-get dist-upgrade --download-only -y >> /var/log/cache-warmup-apt.log 2>&1
+
+# Docker images
+0 21 * * 5 root bash /srv/deployment/cache-manager.sh warmup-images >> /var/log/cache-warmup-images.log 2>&1
+
+# Python packages
+30 21 * * 5 root bash /srv/deployment/cache-manager.sh warmup-pypi >> /var/log/cache-warmup-pypi.log 2>&1
+```
+
+---
+
+## بررسی وضعیت
+
+```bash
+# آخرین آپدیت سرور کش
+ls -lh /var/lib/apt/lists/ | head
+
+# packages در apt-cacher-ng
+du -sh /srv/data/apt-cacher-ng/
+
+# لاگ unattended-upgrades
+tail -f /var/log/unattended-upgrades/unattended-upgrades.log
+```
+
+---
+
+## نکات مهم
+
+1. **Kernel updates:** اگر kernel آپدیت شد، سرور کش نیاز به restart دارد
+2. **Docker updates:** اگر Docker آپدیت شد، باید `systemctl restart docker` اجرا شود
+3. **Testing:** قبل از اعمال در production، در محیط test آزمایش کنید
+4. **Monitoring:** لاگ‌ها را بررسی کنید تا مطمئن شوید آپدیت‌ها موفق بوده‌اند
+
+---
+
+## چک‌لیست نصب
+
+- [ ] نصب `unattended-upgrades`
+- [ ] پیکربندی `/etc/apt/apt.conf.d/50unattended-upgrades`
+- [ ] فعال‌سازی `/etc/apt/apt.conf.d/20auto-upgrades`
+- [ ] اضافه کردن cron برای `apt-get update` هفتگی
+- [ ] تست: `sudo unattended-upgrade --dry-run`
+- [ ] بررسی لاگ: `/var/log/unattended-upgrades/`

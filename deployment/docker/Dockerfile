@@ -8,11 +8,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     POETRY_VIRTUALENVS_CREATE=false \
     POETRY_NO_INTERACTION=1
 
+# Configure apt to use cache server
+# Port 3142: HTTP repositories (Ubuntu base)
+# Port 3144: HTTPS repositories with CONNECT tunneling (Docker repo)
+RUN echo 'Acquire::http::Proxy "http://10.10.10.111:3142";' > /etc/apt/apt.conf.d/00proxy && \
+    echo 'Acquire::https::Proxy "http://10.10.10.111:3144";' >> /etc/apt/apt.conf.d/00proxy
+
 # Install system dependencies
-# Note: Using internet for apt packages since apt-cacher-ng (10.10.10.111:3142) is not accessible from Docker build
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    --network=host \
     apt-get update && apt-get install -y \
     gcc \
     g++ \

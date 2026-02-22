@@ -178,6 +178,20 @@ else
     print_warning "PyPI cache not accessible (port 3141) - will try to install from internet"
 fi
 
+# Check apt-cacher-ng HTTP (port 3142)
+if timeout 3 bash -c "cat < /dev/null > /dev/tcp/$CACHE_SERVER/3142" 2>/dev/null; then
+    print_success "apt-cacher-ng HTTP accessible (port 3142)"
+else
+    print_warning "apt-cacher-ng HTTP not accessible (port 3142) - apt packages may download from internet"
+fi
+
+# Check apt-cacher-ng HTTPS tunneling (port 3144)
+if timeout 3 bash -c "cat < /dev/null > /dev/tcp/$CACHE_SERVER/3144" 2>/dev/null; then
+    print_success "apt-cacher-ng HTTPS tunneling accessible (port 3144)"
+else
+    print_warning "apt-cacher-ng HTTPS not accessible (port 3144) - Docker repo may fail"
+fi
+
 # Check offline packages nginx (port 80)
 if curl -sf -m 3 http://$CACHE_SERVER/pypi-offline/ > /dev/null 2>&1; then
     print_success "Offline packages (nginx) accessible - sentence-transformers 5.2.3 available"

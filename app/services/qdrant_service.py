@@ -572,8 +572,8 @@ class QdrantService:
             
             return {
                 "status": info.status,
-                "vectors_count": info.vectors_count,
-                "points_count": info.points_count,
+                "vectors_count": info.indexed_vectors_count or 0,
+                "points_count": info.points_count or 0,
                 "segments_count": info.segments_count,
                 "config": {
                     "params": info.config.params,

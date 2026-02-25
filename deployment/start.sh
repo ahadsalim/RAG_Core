@@ -17,6 +17,13 @@
 
 set -e
 
+# Check if running as root or with sudo
+if [ "$EUID" -ne 0 ]; then
+    echo "This script must be run as root or with sudo"
+    echo "Please run: sudo $0 $@"
+    exit 1
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -131,18 +138,73 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ============================================================================
+# Step 0.5: Configure apt to use cache server (MUST be before Docker install)
+# ============================================================================
+print_section "Step 0.5: Configuring apt Cache Server"
+
+CACHE_SERVER="10.10.10.111"
+
+# Check if cache server is accessible
+if timeout 3 bash -c "cat < /dev/null > /dev/tcp/$CACHE_SERVER/3142" 2>/dev/null; then
+    print_success "Cache server accessible - configuring apt proxy"
+    
+    # Configure apt proxy for HTTP and HTTPS
+    echo 'Acquire::http::Proxy "http://10.10.10.111:3142";' | sudo tee /etc/apt/apt.conf.d/00proxy > /dev/null
+    echo 'Acquire::https::Proxy "http://10.10.10.111:3144";' | sudo tee -a /etc/apt/apt.conf.d/00proxy > /dev/null
+    
+    print_success "apt configured to use cache server (ports 3142 for HTTP, 3144 for HTTPS)"
+    
+    # Test apt update
+    print_info "Testing apt update through cache..."
+    if sudo apt-get update -qq 2>&1 | grep -q "Failed to fetch"; then
+        print_warning "apt update had some warnings, but continuing..."
+    else
+        print_success "apt update successful through cache"
+    fi
+else
+    print_warning "Cache server not accessible - will try direct internet connection"
+fi
+
+# ============================================================================
 # Step 1: Check prerequisites
 # ============================================================================
 print_section "Step 1: Checking Prerequisites"
 
 if ! command_exists docker; then
     print_warning "Docker is not installed. Installing..."
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-    rm get-docker.sh
+    
+    # Check if cache server is accessible for Docker installation
+    if timeout 3 bash -c "cat < /dev/null > /dev/tcp/$CACHE_SERVER/80" 2>/dev/null; then
+        print_info "Installing Docker from cache server..."
+        
+        # Install prerequisites
+        sudo apt-get install -y ca-certificates curl gnupg
+        
+        # Get Docker GPG key from cache server
+        sudo install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL http://$CACHE_SERVER/keys/docker.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        sudo chmod a+r /etc/apt/keyrings/docker.gpg
+        
+        # Add Docker repository (will use apt-cacher-ng proxy)
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        
+        # Install Docker
+        sudo apt-get update
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin
+        
+        print_success "Docker installed from cache server"
+    else
+        print_warning "Cache server not accessible - trying internet installation..."
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+        rm get-docker.sh
+        print_success "Docker installed from internet"
+    fi
+    
     systemctl enable docker
     systemctl start docker
-    print_success "Docker installed successfully"
+    print_success "Docker service started"
 else
     DOCKER_VERSION=$(docker --version | cut -d' ' -f3 | tr -d ',')
     print_success "Docker installed (v$DOCKER_VERSION)"
@@ -300,14 +362,14 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
     echo ""
     print_section "LLM Configuration"
     echo -e "${YELLOW}LLM1 (Light) - for general queries (e.g. gpt-4o-mini)${NC}"
-    read -p "Enter LLM1 API Key (OpenAI or compatible): " LLM1_KEY_INPUT
+    read -p "Enter LLM1 API Key: " LLM1_KEY_INPUT
     if [ -n "$LLM1_KEY_INPUT" ]; then
-        sed -i "s#LLM1_API_KEY=""#LLM1_API_KEY="$LLM1_KEY_INPUT"#g" "$PROJECT_ROOT/.env"
+        sed -i "s#LLM1_API_KEY=\"your_gapgpt_api_key\"#LLM1_API_KEY=\"$LLM1_KEY_INPUT\"#g" "$PROJECT_ROOT/.env"
     fi
     
-    read -p "Enter LLM1 Base URL [https://api.openai.com/v1]: " LLM1_URL_INPUT
+    read -p "Enter LLM1 Base URL [https://api.gapgpt.app/v1]: " LLM1_URL_INPUT
     if [ -n "$LLM1_URL_INPUT" ]; then
-        sed -i "s#LLM1_BASE_URL="https://api.openai.com/v1"#LLM1_BASE_URL="$LLM1_URL_INPUT"#g" "$PROJECT_ROOT/.env"
+        sed -i "s#LLM1_BASE_URL=\"https://api.gapgpt.app/v1\"#LLM1_BASE_URL=\"$LLM1_URL_INPUT\"#g" "$PROJECT_ROOT/.env"
     fi
     
     read -p "Enter LLM1 Model [gpt-4o-mini]: " LLM1_MODEL_INPUT
@@ -316,50 +378,54 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
     fi
     
     echo ""
-    echo -e "${YELLOW}LLM2 (Pro) - for business queries (e.g. gpt-4o)${NC}"
+    echo -e "${YELLOW}LLM2 (Pro) - for business queries (e.g. gpt-5-mini)${NC}"
     read -p "Enter LLM2 API Key (leave empty to use LLM1 key): " LLM2_KEY_INPUT
     if [ -n "$LLM2_KEY_INPUT" ]; then
-        sed -i "s#LLM2_API_KEY=""#LLM2_API_KEY="$LLM2_KEY_INPUT"#g" "$PROJECT_ROOT/.env"
+        sed -i "s#LLM2_API_KEY=\"your_gapgpt_api_key\"#LLM2_API_KEY=\"$LLM2_KEY_INPUT\"#g" "$PROJECT_ROOT/.env"
     elif [ -n "$LLM1_KEY_INPUT" ]; then
-        sed -i "s#LLM2_API_KEY=""#LLM2_API_KEY="$LLM1_KEY_INPUT"#g" "$PROJECT_ROOT/.env"
+        sed -i "s#LLM2_API_KEY=\"your_gapgpt_api_key\"#LLM2_API_KEY=\"$LLM1_KEY_INPUT\"#g" "$PROJECT_ROOT/.env"
     fi
     
-    read -p "Enter LLM2 Base URL [https://api.openai.com/v1]: " LLM2_URL_INPUT
+    read -p "Enter LLM2 Base URL [https://api.gapgpt.app/v1]: " LLM2_URL_INPUT
     if [ -n "$LLM2_URL_INPUT" ]; then
-        sed -i "s#LLM2_BASE_URL="https://api.openai.com/v1"#LLM2_BASE_URL="$LLM2_URL_INPUT"#g" "$PROJECT_ROOT/.env"
+        sed -i "s#LLM2_BASE_URL=\"https://api.gapgpt.app/v1\"#LLM2_BASE_URL=\"$LLM2_URL_INPUT\"#g" "$PROJECT_ROOT/.env"
     elif [ -n "$LLM1_URL_INPUT" ]; then
-        sed -i "s#LLM2_BASE_URL="https://api.openai.com/v1"#LLM2_BASE_URL="$LLM1_URL_INPUT"#g" "$PROJECT_ROOT/.env"
+        sed -i "s#LLM2_BASE_URL=\"https://api.gapgpt.app/v1\"#LLM2_BASE_URL=\"$LLM1_URL_INPUT\"#g" "$PROJECT_ROOT/.env"
     fi
     
     echo ""
     echo -e "${YELLOW}Classification LLM (for query categorization)${NC}"
     read -p "Enter Classification LLM API Key (leave empty to use LLM1 key): " CLASS_KEY_INPUT
     if [ -n "$CLASS_KEY_INPUT" ]; then
-        sed -i "s#LLM_CLASSIFICATION_API_KEY=""#LLM_CLASSIFICATION_API_KEY="$CLASS_KEY_INPUT"#g" "$PROJECT_ROOT/.env"
+        sed -i "s#LLM_CLASSIFICATION_API_KEY=\"your_gapgpt_api_key\"#LLM_CLASSIFICATION_API_KEY=\"$CLASS_KEY_INPUT\"#g" "$PROJECT_ROOT/.env"
     elif [ -n "$LLM1_KEY_INPUT" ]; then
-        sed -i "s#LLM_CLASSIFICATION_API_KEY=""#LLM_CLASSIFICATION_API_KEY="$LLM1_KEY_INPUT"#g" "$PROJECT_ROOT/.env"
+        sed -i "s#LLM_CLASSIFICATION_API_KEY=\"your_gapgpt_api_key\"#LLM_CLASSIFICATION_API_KEY=\"$LLM1_KEY_INPUT\"#g" "$PROJECT_ROOT/.env"
     fi
     
-    if [ -n "$LLM1_URL_INPUT" ]; then
-        sed -i "s#LLM_CLASSIFICATION_BASE_URL="https://api.openai.com/v1"#LLM_CLASSIFICATION_BASE_URL="$LLM1_URL_INPUT"#g" "$PROJECT_ROOT/.env"
+    read -p "Enter Classification LLM Base URL [https://api.gapgpt.app/v1]: " CLASS_URL_INPUT
+    if [ -n "$CLASS_URL_INPUT" ]; then
+        sed -i "s#LLM_CLASSIFICATION_BASE_URL=\"https://api.gapgpt.app/v1\"#LLM_CLASSIFICATION_BASE_URL=\"$CLASS_URL_INPUT\"#g" "$PROJECT_ROOT/.env"
+    elif [ -n "$LLM1_URL_INPUT" ]; then
+        sed -i "s#LLM_CLASSIFICATION_BASE_URL=\"https://api.gapgpt.app/v1\"#LLM_CLASSIFICATION_BASE_URL=\"$LLM1_URL_INPUT\"#g" "$PROJECT_ROOT/.env"
     fi
     
     # --- Ask for S3/MinIO ---
     echo ""
     print_section "S3/MinIO Configuration"
-    read -p "Enter S3/MinIO Endpoint URL [http://localhost:9000]: " S3_URL_INPUT
-    if [ -n "$S3_URL_INPUT" ]; then
-        sed -i "s#S3_ENDPOINT_URL="http://localhost:9000"#S3_ENDPOINT_URL="$S3_URL_INPUT"#g" "$PROJECT_ROOT/.env"
+    read -p "Enter S3/MinIO Endpoint URL [http://10.10.10.50:9000]: " S3_URL_INPUT
+    if [ -z "$S3_URL_INPUT" ]; then
+        S3_URL_INPUT="http://10.10.10.50:9000"
     fi
+    sed -i "s#S3_ENDPOINT_URL=http://10.10.10.50:9000#S3_ENDPOINT_URL=$S3_URL_INPUT#g" "$PROJECT_ROOT/.env"
     
-    read -p "Enter S3 Access Key [minioadmin]: " S3_KEY_INPUT
+    read -p "Enter S3 Access Key: " S3_KEY_INPUT
     if [ -n "$S3_KEY_INPUT" ]; then
-        sed -i "s#S3_ACCESS_KEY_ID="minioadmin"#S3_ACCESS_KEY_ID="$S3_KEY_INPUT"#g" "$PROJECT_ROOT/.env"
+        sed -i "s#S3_ACCESS_KEY_ID=your_minio_access_key#S3_ACCESS_KEY_ID=$S3_KEY_INPUT#g" "$PROJECT_ROOT/.env"
     fi
     
-    read -p "Enter S3 Secret Key [minioadmin]: " S3_SECRET_INPUT
+    read -p "Enter S3 Secret Key: " S3_SECRET_INPUT
     if [ -n "$S3_SECRET_INPUT" ]; then
-        sed -i "s#S3_SECRET_ACCESS_KEY="minioadmin"#S3_SECRET_ACCESS_KEY="$S3_SECRET_INPUT"#g" "$PROJECT_ROOT/.env"
+        sed -i "s#S3_SECRET_ACCESS_KEY=your_minio_secret_key#S3_SECRET_ACCESS_KEY=$S3_SECRET_INPUT#g" "$PROJECT_ROOT/.env"
     fi
     
     # --- Ask for Reranker Server ---
@@ -426,6 +492,55 @@ if [ -L "$SCRIPT_DIR/docker/.env" ]; then
 fi
 ln -sf "$PROJECT_ROOT/.env" "$SCRIPT_DIR/docker/.env"
 print_success "Symlink created"
+
+# ============================================================================
+# Step 3.5: Configure Docker Daemon for Insecure Registries
+# ============================================================================
+print_section "Step 3.5: Configuring Docker Daemon"
+
+DOCKER_DAEMON_FILE="/etc/docker/daemon.json"
+
+# Check if cache server is accessible
+if timeout 3 bash -c "cat < /dev/null > /dev/tcp/$CACHE_SERVER/5001" 2>/dev/null; then
+    print_info "Configuring Docker to use cache server registries..."
+    
+    # Create or update daemon.json
+    if [ -f "$DOCKER_DAEMON_FILE" ]; then
+        # Backup existing file
+        cp "$DOCKER_DAEMON_FILE" "$DOCKER_DAEMON_FILE.backup.$(date +%s)"
+        print_info "Backed up existing daemon.json"
+    fi
+    
+    # Create new daemon.json with cache server configuration
+    cat > "$DOCKER_DAEMON_FILE" << 'EOF'
+{
+  "registry-mirrors": ["http://10.10.10.111:5001"],
+  "insecure-registries": [
+    "10.10.10.111:5001",
+    "10.10.10.111:5002",
+    "10.10.10.111:5003",
+    "10.10.10.111:5004",
+    "10.10.10.111:5005"
+  ]
+}
+EOF
+    
+    print_success "Docker daemon.json configured"
+    
+    # Restart Docker to apply changes
+    print_info "Restarting Docker daemon..."
+    systemctl restart docker
+    sleep 3
+    
+    if systemctl is-active --quiet docker; then
+        print_success "Docker daemon restarted successfully"
+    else
+        print_error "Failed to restart Docker daemon"
+        exit 1
+    fi
+else
+    print_warning "Cache server not accessible - Docker will use default registries"
+fi
 
 # ============================================================================
 # Step 4: Build and Start Docker Services

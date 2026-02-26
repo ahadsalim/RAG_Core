@@ -292,4 +292,37 @@ curl http://10.10.10.60:8100/health
 
 ---
 
+## 🔧 رفع مشکل CORS - دسترسی سرور کاربران (فوریه 2026)
+
+### مشکل
+سرور کاربران (Users System) نمی‌توانست از پورت 7001 سوال بپرسد. درخواست‌های CORS با خطا مواجه می‌شدند.
+
+### علت
+متغیر `CORS_ORIGINS` در `.env` تعریف نشده بود و لیست origins مجاز خالی بود.
+
+### راه‌حل
+1. **تغییر نوع فیلد در settings.py:**
+   - از `cors_origins: List[str]` به `cors_origins: str`
+   - تغییر validator از `mode="before"` به `mode="after"`
+   - پارس رشته‌های جدا شده با کاما به لیست
+
+2. **افزودن CORS_ORIGINS به .env:**
+   ```bash
+   CORS_ORIGINS=http://localhost:3001,http://10.10.10.30,http://10.10.10.30:3001,https://10.10.10.30
+   ```
+
+3. **تست موفقیت‌آمیز:**
+   ```bash
+   curl -i -X OPTIONS http://localhost:7001/api/v1/query/ \
+     -H "Origin: http://10.10.10.30" \
+     -H "Access-Control-Request-Method: POST"
+   # Response: access-control-allow-origin: http://10.10.10.30
+   ```
+
+### فایل‌های تغییر یافته
+- `/srv/app/config/settings.py` - اصلاح نوع و validator
+- `/srv/.env` - افزودن CORS_ORIGINS
+
+---
+
 *این فایل را قبل از شروع هر کار بخوانید.*

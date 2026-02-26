@@ -297,14 +297,7 @@ print_section "Step 3: Environment Configuration"
 GENERATED_PASSWORDS=""
 
 if [ ! -f "$PROJECT_ROOT/.env" ]; then
-    print_warning ".env file not found. Creating from template..."
-    
-    if [ ! -f "$SCRIPT_DIR/.env.example" ]; then
-        print_error "Template file not found: $SCRIPT_DIR/.env.example"
-        exit 1
-    fi
-    
-    cp "$SCRIPT_DIR/.env.example" "$PROJECT_ROOT/.env"
+    print_warning ".env file not found. Creating new configuration..."
     
     # Generate secure passwords
     JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')
@@ -317,24 +310,6 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
     # Store for post-install display
     GENERATED_PASSWORDS="NEW_INSTALLATION"
     
-    # Update .env with secure values
-    sed -i "s/your-jwt-secret-key-change-in-production/$JWT_SECRET/g" "$PROJECT_ROOT/.env"
-    sed -i "s/core_pass/$DB_PASSWORD/g" "$PROJECT_ROOT/.env"
-    sed -i "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=$DB_PASSWORD#g" "$PROJECT_ROOT/.env"
-    sed -i 's/REDIS_PASSWORD=""/REDIS_PASSWORD="'$REDIS_PASSWORD'"/g' "$PROJECT_ROOT/.env"
-    
-    # Update Redis URLs
-    sed -i "s#redis://redis-core:6379#redis://:$REDIS_PASSWORD@redis-core:6379#g" "$PROJECT_ROOT/.env"
-    sed -i "s#CELERY_BROKER_URL=.*#CELERY_BROKER_URL=\"redis://:$REDIS_PASSWORD@redis-core:6379/1\"#g" "$PROJECT_ROOT/.env"
-    sed -i "s#CELERY_RESULT_BACKEND=.*#CELERY_RESULT_BACKEND=\"redis://:$REDIS_PASSWORD@redis-core:6379/2\"#g" "$PROJECT_ROOT/.env"
-    
-    # Add Flower password
-    echo "FLOWER_PASSWORD=\"$FLOWER_PASSWORD\"" >> "$PROJECT_ROOT/.env"
-    
-    # Update API keys
-    sed -i "s#INGEST_API_KEY=\"\"#INGEST_API_KEY=\"$INGEST_API_KEY\"#g" "$PROJECT_ROOT/.env"
-    sed -i "s#USERS_API_KEY=\"\"#USERS_API_KEY=\"$USERS_API_KEY\"#g" "$PROJECT_ROOT/.env"
-    
     # Ask for domain
     echo ""
     read -p "Enter your domain name (leave empty for localhost): " DOMAIN_INPUT
@@ -342,71 +317,88 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
         DOMAIN_INPUT="localhost"
     fi
     
-    # Set environment to production if real domain
-    if [ "$DOMAIN_INPUT" != "localhost" ]; then
-        sed -i "s/ENVIRONMENT=\"development\"/ENVIRONMENT=\"production\"/g" "$PROJECT_ROOT/.env"
-        sed -i "s/DEBUG=true/DEBUG=false/g" "$PROJECT_ROOT/.env"
-        sed -i "s/RELOAD=true/RELOAD=false/g" "$PROJECT_ROOT/.env"
+    # Ask for Users System configuration
+    echo ""
+    print_section "Users System Configuration"
+    echo -e "${YELLOW}Enter the IP/domain and port of your Users System (for CORS)${NC}"
+    read -p "Users System IP/Domain [10.10.10.30]: " USERS_IP_INPUT
+    if [ -z "$USERS_IP_INPUT" ]; then
+        USERS_IP_INPUT="10.10.10.30"
     fi
     
-    sed -i '/^DOMAIN_NAME=/d' "$PROJECT_ROOT/.env"
-    echo "DOMAIN_NAME=\"$DOMAIN_INPUT\"" >> "$PROJECT_ROOT/.env"
-    
-    # Update CORS_ORIGINS
-    if [ "$DOMAIN_INPUT" != "localhost" ]; then
-        sed -i "s#CORS_ORIGINS=.*#CORS_ORIGINS=\"https://$DOMAIN_INPUT,http://localhost:3000\"#g" "$PROJECT_ROOT/.env"
+    read -p "Users System Port [3001]: " USERS_PORT_INPUT
+    if [ -z "$USERS_PORT_INPUT" ]; then
+        USERS_PORT_INPUT="3001"
     fi
     
+    # Build CORS origins list
+    CORS_ORIGINS="http://localhost:3001,http://${USERS_IP_INPUT},http://${USERS_IP_INPUT}:${USERS_PORT_INPUT}"
+    if [ "$DOMAIN_INPUT" != "localhost" ]; then
+        CORS_ORIGINS="${CORS_ORIGINS},https://${DOMAIN_INPUT}"
+    fi
+    
+    # Set environment based on domain
+    if [ "$DOMAIN_INPUT" != "localhost" ]; then
+        ENVIRONMENT="production"
+        DEBUG="false"
+        RELOAD="false"
+    else
+        ENVIRONMENT="development"
+        DEBUG="false"
+        RELOAD="false"
+    fi
 
     # --- Ask for LLM API Keys ---
     echo ""
     print_section "LLM Configuration"
     echo -e "${YELLOW}LLM1 (Light) - for general queries (e.g. gpt-4o-mini)${NC}"
     read -p "Enter LLM1 API Key: " LLM1_KEY_INPUT
-    if [ -n "$LLM1_KEY_INPUT" ]; then
-        sed -i "s#LLM1_API_KEY=\"your_gapgpt_api_key\"#LLM1_API_KEY=\"$LLM1_KEY_INPUT\"#g" "$PROJECT_ROOT/.env"
+    if [ -z "$LLM1_KEY_INPUT" ]; then
+        LLM1_KEY_INPUT="your_api_key_here"
     fi
     
     read -p "Enter LLM1 Base URL [https://api.gapgpt.app/v1]: " LLM1_URL_INPUT
-    if [ -n "$LLM1_URL_INPUT" ]; then
-        sed -i "s#LLM1_BASE_URL=\"https://api.gapgpt.app/v1\"#LLM1_BASE_URL=\"$LLM1_URL_INPUT\"#g" "$PROJECT_ROOT/.env"
+    if [ -z "$LLM1_URL_INPUT" ]; then
+        LLM1_URL_INPUT="https://api.gapgpt.app/v1"
     fi
     
     read -p "Enter LLM1 Model [gpt-4o-mini]: " LLM1_MODEL_INPUT
-    if [ -n "$LLM1_MODEL_INPUT" ]; then
-        sed -i "s#LLM1_MODEL="gpt-4o-mini"#LLM1_MODEL="$LLM1_MODEL_INPUT"#g" "$PROJECT_ROOT/.env"
+    if [ -z "$LLM1_MODEL_INPUT" ]; then
+        LLM1_MODEL_INPUT="gpt-4o-mini"
     fi
     
     echo ""
     echo -e "${YELLOW}LLM2 (Pro) - for business queries (e.g. gpt-5-mini)${NC}"
     read -p "Enter LLM2 API Key (leave empty to use LLM1 key): " LLM2_KEY_INPUT
-    if [ -n "$LLM2_KEY_INPUT" ]; then
-        sed -i "s#LLM2_API_KEY=\"your_gapgpt_api_key\"#LLM2_API_KEY=\"$LLM2_KEY_INPUT\"#g" "$PROJECT_ROOT/.env"
-    elif [ -n "$LLM1_KEY_INPUT" ]; then
-        sed -i "s#LLM2_API_KEY=\"your_gapgpt_api_key\"#LLM2_API_KEY=\"$LLM1_KEY_INPUT\"#g" "$PROJECT_ROOT/.env"
+    if [ -z "$LLM2_KEY_INPUT" ]; then
+        LLM2_KEY_INPUT="$LLM1_KEY_INPUT"
     fi
     
-    read -p "Enter LLM2 Base URL [https://api.gapgpt.app/v1]: " LLM2_URL_INPUT
-    if [ -n "$LLM2_URL_INPUT" ]; then
-        sed -i "s#LLM2_BASE_URL=\"https://api.gapgpt.app/v1\"#LLM2_BASE_URL=\"$LLM2_URL_INPUT\"#g" "$PROJECT_ROOT/.env"
-    elif [ -n "$LLM1_URL_INPUT" ]; then
-        sed -i "s#LLM2_BASE_URL=\"https://api.gapgpt.app/v1\"#LLM2_BASE_URL=\"$LLM1_URL_INPUT\"#g" "$PROJECT_ROOT/.env"
+    read -p "Enter LLM2 Base URL [use LLM1 URL]: " LLM2_URL_INPUT
+    if [ -z "$LLM2_URL_INPUT" ]; then
+        LLM2_URL_INPUT="$LLM1_URL_INPUT"
+    fi
+    
+    read -p "Enter LLM2 Model [gpt-5-mini]: " LLM2_MODEL_INPUT
+    if [ -z "$LLM2_MODEL_INPUT" ]; then
+        LLM2_MODEL_INPUT="gpt-5-mini"
     fi
     
     echo ""
     echo -e "${YELLOW}Classification LLM (for query categorization)${NC}"
     read -p "Enter Classification LLM API Key (leave empty to use LLM1 key): " CLASS_KEY_INPUT
-    if [ -n "$CLASS_KEY_INPUT" ]; then
-        sed -i "s#LLM_CLASSIFICATION_API_KEY=\"your_gapgpt_api_key\"#LLM_CLASSIFICATION_API_KEY=\"$CLASS_KEY_INPUT\"#g" "$PROJECT_ROOT/.env"
-    elif [ -n "$LLM1_KEY_INPUT" ]; then
-        sed -i "s#LLM_CLASSIFICATION_API_KEY=\"your_gapgpt_api_key\"#LLM_CLASSIFICATION_API_KEY=\"$LLM1_KEY_INPUT\"#g" "$PROJECT_ROOT/.env"
+    if [ -z "$CLASS_KEY_INPUT" ]; then
+        CLASS_KEY_INPUT="$LLM1_KEY_INPUT"
     fi
     
-    read -p "Enter Classification LLM Base URL [https://api.gapgpt.app/v1]: " CLASS_URL_INPUT
-    if [ -n "$CLASS_URL_INPUT" ]; then
-        sed -i "s#LLM_CLASSIFICATION_BASE_URL=\"https://api.gapgpt.app/v1\"#LLM_CLASSIFICATION_BASE_URL=\"$CLASS_URL_INPUT\"#g" "$PROJECT_ROOT/.env"
-    elif [ -n "$LLM1_URL_INPUT" ]; then
-        sed -i "s#LLM_CLASSIFICATION_BASE_URL=\"https://api.gapgpt.app/v1\"#LLM_CLASSIFICATION_BASE_URL=\"$LLM1_URL_INPUT\"#g" "$PROJECT_ROOT/.env"
+    read -p "Enter Classification LLM Base URL [use LLM1 URL]: " CLASS_URL_INPUT
+    if [ -z "$CLASS_URL_INPUT" ]; then
+        CLASS_URL_INPUT="$LLM1_URL_INPUT"
+    fi
+    
+    read -p "Enter Classification LLM Model [gpt-4o-mini]: " CLASS_MODEL_INPUT
+    if [ -z "$CLASS_MODEL_INPUT" ]; then
+        CLASS_MODEL_INPUT="gpt-4o-mini"
     fi
     
     # --- Ask for S3/MinIO ---
@@ -416,16 +408,15 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
     if [ -z "$S3_URL_INPUT" ]; then
         S3_URL_INPUT="http://10.10.10.50:9000"
     fi
-    sed -i "s#S3_ENDPOINT_URL=http://10.10.10.50:9000#S3_ENDPOINT_URL=$S3_URL_INPUT#g" "$PROJECT_ROOT/.env"
     
     read -p "Enter S3 Access Key: " S3_KEY_INPUT
-    if [ -n "$S3_KEY_INPUT" ]; then
-        sed -i "s#S3_ACCESS_KEY_ID=your_minio_access_key#S3_ACCESS_KEY_ID=$S3_KEY_INPUT#g" "$PROJECT_ROOT/.env"
+    if [ -z "$S3_KEY_INPUT" ]; then
+        S3_KEY_INPUT="your_s3_access_key"
     fi
     
     read -p "Enter S3 Secret Key: " S3_SECRET_INPUT
-    if [ -n "$S3_SECRET_INPUT" ]; then
-        sed -i "s#S3_SECRET_ACCESS_KEY=your_minio_secret_key#S3_SECRET_ACCESS_KEY=$S3_SECRET_INPUT#g" "$PROJECT_ROOT/.env"
+    if [ -z "$S3_SECRET_INPUT" ]; then
+        S3_SECRET_INPUT="your_s3_secret_key"
     fi
     
     # --- Ask for Reranker Server ---
@@ -442,9 +433,7 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
         RERANKER_PORT_INPUT="8100"
     fi
     
-    # Update RERANKER_SERVICE_URL in .env
     RERANKER_URL="http://${RERANKER_HOST_INPUT}:${RERANKER_PORT_INPUT}"
-    sed -i "s#RERANKER_SERVICE_URL=\"http://localhost:8100\"#RERANKER_SERVICE_URL=\"$RERANKER_URL\"#g" "$PROJECT_ROOT/.env"
     
     # Test reranker connection
     echo -n "Testing connection to reranker server... "
@@ -454,6 +443,192 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
         print_warning "Could not reach reranker server at ${RERANKER_URL}"
         print_warning "Make sure the reranker service is running before starting Core API"
     fi
+    
+    # ========================================================================
+    # Create .env file from scratch
+    # ========================================================================
+    print_info "Creating .env file..."
+    
+    cat > "$PROJECT_ROOT/.env" << EOF
+# =============================================================================
+# Core System Environment Variables
+# Auto-generated by deployment script
+# =============================================================================
+
+# Application
+APP_NAME="RAG Core System"
+APP_VERSION="1.5.0"
+ENVIRONMENT="${ENVIRONMENT}"
+DEBUG=${DEBUG}
+LOG_LEVEL="INFO"
+
+# Server
+HOST="0.0.0.0"
+PORT=7001
+WORKERS=4
+RELOAD=${RELOAD}
+
+# CORS - اجازه دسترسی به سرورهای مجاز
+CORS_ORIGINS=${CORS_ORIGINS}
+
+# Security
+JWT_SECRET_KEY="${JWT_SECRET}"
+JWT_ALGORITHM="HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# Database - Core DB
+POSTGRES_DB=core_db
+POSTGRES_USER=core_user
+POSTGRES_PASSWORD=${DB_PASSWORD}
+DATABASE_URL="postgresql+asyncpg://core_user:${DB_PASSWORD}@postgres-core:5432/core_db"
+DATABASE_POOL_SIZE=20
+DATABASE_MAX_OVERFLOW=40
+DATABASE_POOL_TIMEOUT=30
+DATABASE_ECHO=false
+
+# Qdrant Vector Database
+QDRANT_HOST="qdrant"
+QDRANT_PORT=6333
+QDRANT_GRPC_PORT=7334
+QDRANT_API_KEY=""
+QDRANT_COLLECTION="legal_documents"
+QDRANT_USE_GRPC=false
+
+# Redis
+REDIS_URL="redis://:${REDIS_PASSWORD}@redis-core:6379/0"
+REDIS_PASSWORD="${REDIS_PASSWORD}"
+REDIS_MAX_CONNECTIONS=50
+REDIS_DECODE_RESPONSES=true
+
+# Cache Settings
+CACHE_TTL_DEFAULT=3600
+CACHE_TTL_QUERY=7200
+CACHE_TTL_EMBEDDING=86400
+SEMANTIC_CACHE_THRESHOLD=0.95
+
+# Celery
+CELERY_BROKER_URL="redis://:${REDIS_PASSWORD}@redis-core:6379/1"
+CELERY_RESULT_BACKEND="redis://:${REDIS_PASSWORD}@redis-core:6379/2"
+CELERY_TASK_SERIALIZER="json"
+CELERY_RESULT_SERIALIZER="json"
+CELERY_TIMEZONE="Asia/Tehran"
+CELERY_ENABLE_UTC=false
+
+# LLM1 (Light) - for general queries
+LLM1_MAX_TOKENS=2048
+LLM1_TEMPERATURE=0.7
+LLM1_API_KEY="${LLM1_KEY_INPUT}"
+LLM1_BASE_URL="${LLM1_URL_INPUT}"
+LLM1_MODEL="${LLM1_MODEL_INPUT}"
+LLM1_FALLBACK_API_KEY="${LLM1_KEY_INPUT}"
+LLM1_FALLBACK_BASE_URL="${LLM1_URL_INPUT}"
+LLM1_FALLBACK_MODEL="${LLM1_MODEL_INPUT}"
+
+# LLM2 (Pro) - for business queries
+LLM2_MAX_TOKENS=8192
+LLM2_TEMPERATURE=0.4
+LLM2_API_KEY="${LLM2_KEY_INPUT}"
+LLM2_BASE_URL="${LLM2_URL_INPUT}"
+LLM2_MODEL="${LLM2_MODEL_INPUT}"
+LLM2_FALLBACK_API_KEY="${LLM2_KEY_INPUT}"
+LLM2_FALLBACK_BASE_URL="${LLM2_URL_INPUT}"
+LLM2_FALLBACK_MODEL="${LLM2_MODEL_INPUT}"
+
+# LLM Classification
+LLM_CLASSIFICATION_MAX_TOKENS=512
+LLM_CLASSIFICATION_TEMPERATURE=0.2
+LLM_CLASSIFICATION_API_KEY="${CLASS_KEY_INPUT}"
+LLM_CLASSIFICATION_BASE_URL="${CLASS_URL_INPUT}"
+LLM_CLASSIFICATION_MODEL="${CLASS_MODEL_INPUT}"
+LLM_CLASSIFICATION_FALLBACK_API_KEY="${CLASS_KEY_INPUT}"
+LLM_CLASSIFICATION_FALLBACK_BASE_URL="${CLASS_URL_INPUT}"
+LLM_CLASSIFICATION_FALLBACK_MODEL="${CLASS_MODEL_INPUT}"
+
+# LLM Timeout Settings
+LLM_PRIMARY_TIMEOUT=30
+LLM_WEB_SEARCH_TIMEOUT=90
+
+# Embedding Configuration
+EMBEDDING_MODEL="intfloat/multilingual-e5-large"
+EMBEDDING_DIM=1024
+EMBEDDING_API_KEY=""
+EMBEDDING_BASE_URL=""
+
+# Reranking (Dedicated Server)
+RERANKER_SERVICE_URL="${RERANKER_URL}"
+RERANKING_MODEL="BAAI/bge-reranker-v2-m3"
+RERANKING_TOP_K=10
+
+# OCR Settings
+OCR_LANGUAGE="fas+eng"
+TESSERACT_CMD="/usr/bin/tesseract"
+MAX_IMAGE_SIZE_MB=10
+
+# RAG Settings
+RAG_CHUNK_SIZE=450
+RAG_CHUNK_OVERLAP=50
+RAG_TOP_K_RETRIEVAL=20
+RAG_MAX_CHUNKS=5
+RAG_RETRIEVE_MULTIPLIER=5
+RAG_RERANKER_THRESHOLD=0.3
+RAG_TOP_K_RERANK=5
+RAG_SIMILARITY_THRESHOLD=0.5
+RAG_MAX_CONTEXT_LENGTH=8192
+RAG_USE_HYBRID_SEARCH=true
+RAG_BM25_WEIGHT=0.3
+RAG_VECTOR_WEIGHT=0.7
+
+# RAG Web Search
+ENABLE_RAG_WEB_SEARCH=false
+
+# Search Settings
+SEARCH_MAX_RESULTS=50
+SEARCH_TIMEOUT=30
+FUZZY_MATCH_THRESHOLD=0.8
+
+# Rate Limiting
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_PER_MINUTE=60
+RATE_LIMIT_PER_HOUR=1000
+RATE_LIMIT_PER_DAY=10000
+
+# MinIO (External Object Storage)
+S3_ACCESS_KEY_ID=${S3_KEY_INPUT}
+S3_SECRET_ACCESS_KEY=${S3_SECRET_INPUT}
+S3_ENDPOINT_URL=${S3_URL_INPUT}
+S3_REGION="us-east-1"
+S3_USE_SSL=false
+S3_DOCUMENTS_BUCKET="ingest-system"
+S3_TEMP_BUCKET="temp-userfile"
+
+# API Keys for Inter-Service Communication
+INGEST_API_KEY="${INGEST_API_KEY}"
+USERS_API_KEY="${USERS_API_KEY}"
+
+# System Limits
+MAX_CONCURRENT_REQUESTS=100
+MAX_HISTORY_LENGTH=50
+MAX_QUERY_LENGTH=2000
+REQUEST_TIMEOUT=60
+
+# Temporary File Storage
+TEMP_FILE_EXPIRATION_HOURS=12
+
+# Backup Server Configuration
+BACKUP_SERVER_HOST=""
+BACKUP_SERVER_USER=""
+BACKUP_SERVER_PATH="/backups/core"
+BACKUP_SSH_KEY="/root/.ssh/backup_key"
+BACKUP_RETENTION_DAYS=30
+BACKUP_KEEP_LOCAL=false
+
+# Flower
+FLOWER_PASSWORD="${FLOWER_PASSWORD}"
+
+# Domain
+DOMAIN_NAME="${DOMAIN_INPUT}"
+EOF
     
     print_success ".env file created with secure passwords"
 else

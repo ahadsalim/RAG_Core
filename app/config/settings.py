@@ -44,16 +44,16 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = Field(default=7)
     
     # CORS
-    cors_origins: List[str] = Field(default_factory=list)
+    cors_origins: str = Field(default="")
     cors_allow_credentials: bool = Field(default=True)
     cors_allow_methods: List[str] = Field(default=["*"])
     cors_allow_headers: List[str] = Field(default=["*"])
     
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", mode="after")
     def parse_cors_origins(cls, v):
-        if isinstance(v, str):
+        if isinstance(v, str) and v:
             return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
+        return []
     
     # Database - Core DB
     database_url: PostgresDsn
